@@ -1,0 +1,44 @@
+.fade-enter-active,
+.fade-leave-active {
+
+  transition:
+    opacity 180ms ease,
+    transform 180ms ease;
+
+}
+
+
+.fade-enter-from,
+.fade-leave-to {
+
+  opacity: 0;
+
+  transform:
+    translateY(5px);
+
+}
+
+
+@keyframes budget-pulse {
+
+  0% {
+    opacity: 0.65;
+  }
+
+  50% {
+    opacity: 1;
+  }
+
+  100% {
+    opacity: 0.65;
+  }
+
+}
+
+
+.loading-pulse {
+
+  animation:
+    budget-pulse 1.4s ease-in-out infinite;
+
+}

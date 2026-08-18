@@ -1,0 +1,14 @@
+Sample .env
+
+PORT=3000
+
+DB_HOST=127.0.0.1
+DB_PORT=330602
+DB_USER=maula
+DB_PASSWORD=adminganteng
+DB_NAME=monthly_budget
+
+JWT_SECRET=monthly_budget_super_secret_change_this_2026
+JWT_EXPIRES_IN=7d
+
+FRONTEND_URL=http://localhost:5173
