@@ -1,6 +1,6 @@
 {
   "name": "monthly-budget",
-  "version": "1.2.1",
+  "version": "1.5.10",
   "private": true,
   "scripts": {
     "dev": "concurrently --kill-others-on-fail --names BACKEND,FRONTEND --prefix-colors blue,green \"npm --prefix backend run dev\" \"npm --prefix frontend run dev\"",

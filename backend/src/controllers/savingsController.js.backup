@@ -1,0 +1,1274 @@
+const {
+    Savings,
+    SavingsTransaction,
+    Notification
+} = require('../models')
+
+const sequelize =
+    require('../config/sequelize')
+
+
+/*
+|--------------------------------------------------------------------------
+| Helper
+|--------------------------------------------------------------------------
+*/
+
+function toNumber(value) {
+
+    const number =
+        Number(value)
+
+    return Number.isFinite(number)
+        ? number
+        : NaN
+}
+
+
+function formatRupiah(value) {
+
+    return new Intl.NumberFormat(
+        'id-ID',
+        {
+            style: 'currency',
+            currency: 'IDR',
+            maximumFractionDigits: 0
+        }
+    ).format(
+        Number(value)
+    )
+
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| GET ALL SAVINGS
+|--------------------------------------------------------------------------
+*/
+
+async function getSavings(req, res) {
+
+    try {
+
+        const savings =
+            await Savings.findAll({
+
+                where: {
+                    user_id: req.user.id
+                },
+
+                include: [
+                    {
+                        model: SavingsTransaction,
+                        as: 'transactions',
+                        separate: true,
+                        order: [
+                            [
+                                'transaction_date',
+                                'DESC'
+                            ],
+                            [
+                                'id',
+                                'DESC'
+                            ]
+                        ]
+                    }
+                ],
+
+                order: [
+                    [
+                        'created_at',
+                        'DESC'
+                    ]
+                ]
+
+            })
+
+
+        return res.json({
+
+            success: true,
+
+            data: savings
+
+        })
+
+
+    } catch (error) {
+
+        console.error(
+            'GET SAVINGS ERROR:',
+            error
+        )
+
+        return res.status(500).json({
+
+            success: false,
+
+            message:
+                'Gagal mengambil data tabungan.'
+
+        })
+
+    }
+
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| GET SINGLE SAVING
+|--------------------------------------------------------------------------
+*/
+
+async function getSaving(req, res) {
+
+    try {
+
+        const saving =
+            await Savings.findOne({
+
+                where: {
+
+                    id:
+                        req.params.id,
+
+                    user_id:
+                        req.user.id
+
+                },
+
+                include: [
+                    {
+                        model: SavingsTransaction,
+                        as: 'transactions',
+                        separate: true,
+                        order: [
+                            [
+                                'transaction_date',
+                                'DESC'
+                            ],
+                            [
+                                'id',
+                                'DESC'
+                            ]
+                        ]
+                    }
+                ]
+
+            })
+
+
+        if (!saving) {
+
+            return res.status(404).json({
+
+                success: false,
+
+                message:
+                    'Tabungan tidak ditemukan.'
+
+            })
+
+        }
+
+
+        return res.json({
+
+            success: true,
+
+            data: saving
+
+        })
+
+
+    } catch (error) {
+
+        console.error(
+            'GET SAVING ERROR:',
+            error
+        )
+
+        return res.status(500).json({
+
+            success: false,
+
+            message:
+                'Gagal mengambil data tabungan.'
+
+        })
+
+    }
+
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| CREATE SAVING
+|--------------------------------------------------------------------------
+*/
+
+async function createSaving(req, res) {
+
+    try {
+
+        const {
+            name,
+            target_amount,
+            target_date,
+            description
+        } = req.body
+
+
+        const target =
+            toNumber(
+                target_amount
+            )
+
+
+        const errors = []
+
+
+        if (
+            !name ||
+            !String(name).trim()
+        ) {
+
+            errors.push(
+                'Nama tabungan wajib diisi.'
+            )
+
+        }
+
+
+        if (
+            !Number.isFinite(target) ||
+            target <= 0
+        ) {
+
+            errors.push(
+                'Target tabungan harus lebih besar dari 0.'
+            )
+
+        }
+
+
+        if (errors.length) {
+
+            return res.status(400).json({
+
+                success: false,
+
+                message:
+                    'Data tabungan tidak valid.',
+
+                errors
+
+            })
+
+        }
+
+
+        const saving =
+            await Savings.create({
+
+                user_id:
+                    req.user.id,
+
+                name:
+                    String(name).trim(),
+
+                target_amount:
+                    target,
+
+                current_amount:
+                    0,
+
+                target_date:
+                    target_date || null,
+
+                description:
+                    description
+                        ? String(description).trim()
+                        : null,
+
+                status:
+                    'active'
+
+            })
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | Notification
+        |--------------------------------------------------------------------------
+        */
+
+        if (Notification) {
+
+            await Notification.create({
+
+                user_id:
+                    req.user.id,
+
+                type:
+                    'saving',
+
+                title:
+                    'Tabungan baru dibuat',
+
+                message:
+                    `Tabungan "${saving.name}" berhasil dibuat dengan target ${formatRupiah(target)}.`,
+
+                is_read:
+                    false
+
+            })
+
+        }
+
+
+        return res.status(201).json({
+
+            success: true,
+
+            message:
+                'Tabungan berhasil dibuat.',
+
+            data:
+                saving
+
+        })
+
+
+    } catch (error) {
+
+        console.error(
+            'CREATE SAVING ERROR:',
+            error
+        )
+
+        return res.status(500).json({
+
+            success: false,
+
+            message:
+                'Gagal membuat tabungan.'
+
+        })
+
+    }
+
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| UPDATE SAVING
+|--------------------------------------------------------------------------
+*/
+
+async function updateSaving(req, res) {
+
+    try {
+
+        const saving =
+            await Savings.findOne({
+
+                where: {
+
+                    id:
+                        req.params.id,
+
+                    user_id:
+                        req.user.id
+
+                }
+
+            })
+
+
+        if (!saving) {
+
+            return res.status(404).json({
+
+                success: false,
+
+                message:
+                    'Tabungan tidak ditemukan.'
+
+            })
+
+        }
+
+
+        const {
+            name,
+            target_amount,
+            target_date,
+            description,
+            status
+        } = req.body
+
+
+        if (name !== undefined) {
+
+            if (
+                !String(name).trim()
+            ) {
+
+                return res.status(400).json({
+
+                    success: false,
+
+                    message:
+                        'Nama tabungan tidak boleh kosong.'
+
+                })
+
+            }
+
+
+            saving.name =
+                String(name).trim()
+
+        }
+
+
+        if (
+            target_amount !== undefined
+        ) {
+
+            const target =
+                toNumber(
+                    target_amount
+                )
+
+
+            if (
+                !Number.isFinite(target) ||
+                target <= 0
+            ) {
+
+                return res.status(400).json({
+
+                    success: false,
+
+                    message:
+                        'Target tabungan tidak valid.'
+
+                })
+
+            }
+
+
+            if (
+                target <
+                Number(saving.current_amount)
+            ) {
+
+                return res.status(400).json({
+
+                    success: false,
+
+                    message:
+                        'Target tidak boleh lebih kecil dari saldo tabungan saat ini.'
+
+                })
+
+            }
+
+
+            saving.target_amount =
+                target
+
+        }
+
+
+        if (
+            target_date !== undefined
+        ) {
+
+            saving.target_date =
+                target_date || null
+
+        }
+
+
+        if (
+            description !== undefined
+        ) {
+
+            saving.description =
+                description
+                    ? String(description).trim()
+                    : null
+
+        }
+
+
+        if (
+            status !== undefined
+        ) {
+
+            if (
+                ![
+                    'active',
+                    'completed',
+                    'cancelled'
+                ].includes(status)
+            ) {
+
+                return res.status(400).json({
+
+                    success: false,
+
+                    message:
+                        'Status tabungan tidak valid.'
+
+                })
+
+            }
+
+
+            saving.status =
+                status
+
+        }
+
+
+        await saving.save()
+
+
+        return res.json({
+
+            success: true,
+
+            message:
+                'Tabungan berhasil diperbarui.',
+
+            data:
+                saving
+
+        })
+
+
+    } catch (error) {
+
+        console.error(
+            'UPDATE SAVING ERROR:',
+            error
+        )
+
+        return res.status(500).json({
+
+            success: false,
+
+            message:
+                'Gagal memperbarui tabungan.'
+
+        })
+
+    }
+
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| DELETE SAVING
+|--------------------------------------------------------------------------
+*/
+
+async function deleteSaving(req, res) {
+
+    try {
+
+        const saving =
+            await Savings.findOne({
+
+                where: {
+
+                    id:
+                        req.params.id,
+
+                    user_id:
+                        req.user.id
+
+                }
+
+            })
+
+
+        if (!saving) {
+
+            return res.status(404).json({
+
+                success: false,
+
+                message:
+                    'Tabungan tidak ditemukan.'
+
+            })
+
+        }
+
+
+        const name =
+            saving.name
+
+
+        await saving.destroy()
+
+
+        if (Notification) {
+
+            await Notification.create({
+
+                user_id:
+                    req.user.id,
+
+                type:
+                    'saving',
+
+                title:
+                    'Tabungan dihapus',
+
+                message:
+                    `Tabungan "${name}" berhasil dihapus.`,
+
+                is_read:
+                    false
+
+            })
+
+        }
+
+
+        return res.json({
+
+            success: true,
+
+            message:
+                'Tabungan berhasil dihapus.'
+
+        })
+
+
+    } catch (error) {
+
+        console.error(
+            'DELETE SAVING ERROR:',
+            error
+        )
+
+        return res.status(500).json({
+
+            success: false,
+
+            message:
+                'Gagal menghapus tabungan.'
+
+        })
+
+    }
+
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| DEPOSIT
+|--------------------------------------------------------------------------
+*/
+
+async function depositSaving(req, res) {
+
+    const transaction =
+        await sequelize.transaction()
+
+
+    try {
+
+        const saving =
+            await Savings.findOne({
+
+                where: {
+
+                    id:
+                        req.params.id,
+
+                    user_id:
+                        req.user.id
+
+                },
+
+                transaction,
+
+                lock:
+                    transaction.LOCK.UPDATE
+
+            })
+
+
+        if (!saving) {
+
+            await transaction.rollback()
+
+            return res.status(404).json({
+
+                success: false,
+
+                message:
+                    'Tabungan tidak ditemukan.'
+
+            })
+
+        }
+
+
+        if (
+            saving.status === 'cancelled'
+        ) {
+
+            await transaction.rollback()
+
+            return res.status(400).json({
+
+                success: false,
+
+                message:
+                    'Tabungan sudah dibatalkan.'
+
+            })
+
+        }
+
+
+        const {
+            amount,
+            description,
+            transaction_date
+        } = req.body
+
+
+        const depositAmount =
+            toNumber(amount)
+
+
+        if (
+            !Number.isFinite(
+                depositAmount
+            ) ||
+            depositAmount <= 0
+        ) {
+
+            await transaction.rollback()
+
+            return res.status(400).json({
+
+                success: false,
+
+                message:
+                    'Nominal deposit tidak valid.'
+
+            })
+
+        }
+
+
+        const current =
+            Number(
+                saving.current_amount
+            )
+
+
+        const target =
+            Number(
+                saving.target_amount
+            )
+
+
+        const newAmount =
+            current +
+            depositAmount
+
+
+        saving.current_amount =
+            newAmount
+
+
+        if (
+            newAmount >= target
+        ) {
+
+            saving.status =
+                'completed'
+
+        }
+
+
+        await saving.save({
+            transaction
+        })
+
+
+        const savingTransaction =
+            await SavingsTransaction.create({
+
+                user_id:
+                    req.user.id,
+
+                saving_id:
+                    saving.id,
+
+                type:
+                    'deposit',
+
+                amount:
+                    depositAmount,
+
+                description:
+                    description
+                        ? String(description).trim()
+                        : null,
+
+                transaction_date:
+                    transaction_date ||
+                    new Date()
+
+            }, {
+                transaction
+            })
+
+
+        await transaction.commit()
+
+
+        if (Notification) {
+
+            await Notification.create({
+
+                user_id:
+                    req.user.id,
+
+                type:
+                    'saving',
+
+                title:
+                    'Tabungan bertambah',
+
+                message:
+                    `Deposit ${formatRupiah(depositAmount)} ditambahkan ke tabungan "${saving.name}".`,
+
+                is_read:
+                    false
+
+            })
+
+        }
+
+
+        return res.status(201).json({
+
+            success: true,
+
+            message:
+                'Deposit berhasil ditambahkan.',
+
+            data: {
+
+                saving,
+
+                transaction:
+                    savingTransaction
+
+            }
+
+        })
+
+
+    } catch (error) {
+
+        try {
+            await transaction.rollback()
+        } catch {}
+
+
+        console.error(
+            'DEPOSIT SAVING ERROR:',
+            error
+        )
+
+        return res.status(500).json({
+
+            success: false,
+
+            message:
+                'Gagal menambahkan deposit.'
+
+        })
+
+    }
+
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| WITHDRAW
+|--------------------------------------------------------------------------
+*/
+
+async function withdrawSaving(req, res) {
+
+    const transaction =
+        await sequelize.transaction()
+
+
+    try {
+
+        const saving =
+            await Savings.findOne({
+
+                where: {
+
+                    id:
+                        req.params.id,
+
+                    user_id:
+                        req.user.id
+
+                },
+
+                transaction,
+
+                lock:
+                    transaction.LOCK.UPDATE
+
+            })
+
+
+        if (!saving) {
+
+            await transaction.rollback()
+
+            return res.status(404).json({
+
+                success: false,
+
+                message:
+                    'Tabungan tidak ditemukan.'
+
+            })
+
+        }
+
+
+        const {
+            amount,
+            description,
+            transaction_date
+        } = req.body
+
+
+        const withdrawAmount =
+            toNumber(amount)
+
+
+        if (
+            !Number.isFinite(
+                withdrawAmount
+            ) ||
+            withdrawAmount <= 0
+        ) {
+
+            await transaction.rollback()
+
+            return res.status(400).json({
+
+                success: false,
+
+                message:
+                    'Nominal withdrawal tidak valid.'
+
+            })
+
+        }
+
+
+        const current =
+            Number(
+                saving.current_amount
+            )
+
+
+        if (
+            withdrawAmount >
+            current
+        ) {
+
+            await transaction.rollback()
+
+            return res.status(400).json({
+
+                success: false,
+
+                message:
+                    'Saldo tabungan tidak mencukupi.'
+
+            })
+
+        }
+
+
+        saving.current_amount =
+            current -
+            withdrawAmount
+
+
+        if (
+            saving.status === 'completed'
+        ) {
+
+            saving.status =
+                'active'
+
+        }
+
+
+        await saving.save({
+            transaction
+        })
+
+
+        const savingTransaction =
+            await SavingsTransaction.create({
+
+                user_id:
+                    req.user.id,
+
+                saving_id:
+                    saving.id,
+
+                type:
+                    'withdrawal',
+
+                amount:
+                    withdrawAmount,
+
+                description:
+                    description
+                        ? String(description).trim()
+                        : null,
+
+                transaction_date:
+                    transaction_date ||
+                    new Date()
+
+            }, {
+                transaction
+            })
+
+
+        await transaction.commit()
+
+
+        if (Notification) {
+
+            await Notification.create({
+
+                user_id:
+                    req.user.id,
+
+                type:
+                    'saving',
+
+                title:
+                    'Tabungan berkurang',
+
+                message:
+                    `Withdrawal ${formatRupiah(withdrawAmount)} dari tabungan "${saving.name}".`,
+
+                is_read:
+                    false
+
+            })
+
+        }
+
+
+        return res.status(201).json({
+
+            success: true,
+
+            message:
+                'Withdrawal berhasil.',
+
+            data: {
+
+                saving,
+
+                transaction:
+                    savingTransaction
+
+            }
+
+        })
+
+
+    } catch (error) {
+
+        try {
+            await transaction.rollback()
+        } catch {}
+
+
+        console.error(
+            'WITHDRAW SAVING ERROR:',
+            error
+        )
+
+        return res.status(500).json({
+
+            success: false,
+
+            message:
+                'Gagal melakukan withdrawal.'
+
+        })
+
+    }
+
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| TRANSACTIONS
+|--------------------------------------------------------------------------
+*/
+
+async function getSavingTransactions(req, res) {
+
+    try {
+
+        const saving =
+            await Savings.findOne({
+
+                where: {
+
+                    id:
+                        req.params.id,
+
+                    user_id:
+                        req.user.id
+
+                },
+
+                attributes: [
+                    'id',
+                    'name'
+                ]
+
+            })
+
+
+        if (!saving) {
+
+            return res.status(404).json({
+
+                success: false,
+
+                message:
+                    'Tabungan tidak ditemukan.'
+
+            })
+
+        }
+
+
+        const transactions =
+            await SavingsTransaction.findAll({
+
+                where: {
+
+                    saving_id:
+                        saving.id,
+
+                    user_id:
+                        req.user.id
+
+                },
+
+                order: [
+                    [
+                        'transaction_date',
+                        'DESC'
+                    ],
+                    [
+                        'id',
+                        'DESC'
+                    ]
+                ]
+
+            })
+
+
+        return res.json({
+
+            success: true,
+
+            data: {
+
+                saving,
+
+                transactions
+
+            }
+
+        })
+
+
+    } catch (error) {
+
+        console.error(
+            'GET SAVING TRANSACTIONS ERROR:',
+            error
+        )
+
+        return res.status(500).json({
+
+            success: false,
+
+            message:
+                'Gagal mengambil riwayat tabungan.'
+
+        })
+
+    }
+
+}
+
+
+module.exports = {
+
+    getSavings,
+
+    getSaving,
+
+    createSaving,
+
+    updateSaving,
+
+    deleteSaving,
+
+    depositSaving,
+
+    withdrawSaving,
+
+    getSavingTransactions
+
+}

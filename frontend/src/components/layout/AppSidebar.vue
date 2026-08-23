@@ -80,10 +80,16 @@ const menus = [
       },
 
       {
-        name: 'Budget',
-        icon: 'bi-wallet2',
-        path: '/budget'
-      },
+  name: 'Budget',
+  icon: 'bi-wallet2',
+  path: '/budget'
+},
+
+{
+  name: 'Tabungan',
+  icon: 'bi-piggy-bank',
+  path: '/savings'
+},
 
       {
         name: 'Accounts',

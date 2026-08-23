@@ -4,6 +4,8 @@ const Account = require('./Account')
 const Transaction = require('./Transaction')
 const MonthlyBudget = require('./MonthlyBudget')
 const Notification = require('./Notification')
+const Savings = require('./Savings')
+const SavingsTransaction = require('./SavingsTransaction')
 
 /*
 |--------------------------------------------------------------------------
@@ -74,6 +76,42 @@ Notification.belongsTo(User, {
     as: 'user'
 })
 
+User.hasMany(Savings, {
+    foreignKey: 'user_id',
+    as: 'savings',
+    onDelete: 'CASCADE',
+    hooks: true
+})
+
+Savings.belongsTo(User, {
+    foreignKey: 'user_id',
+    as: 'user'
+})
+
+
+User.hasMany(SavingsTransaction, {
+    foreignKey: 'user_id',
+    as: 'savingsTransactions',
+    onDelete: 'CASCADE',
+    hooks: true
+})
+
+SavingsTransaction.belongsTo(User, {
+    foreignKey: 'user_id',
+    as: 'user'
+})
+
+Savings.hasMany(SavingsTransaction, {
+    foreignKey: 'saving_id',
+    as: 'transactions',
+    onDelete: 'CASCADE',
+    hooks: true
+})
+
+SavingsTransaction.belongsTo(Savings, {
+    foreignKey: 'saving_id',
+    as: 'saving'
+})
 
 /*
 |--------------------------------------------------------------------------
@@ -126,5 +164,7 @@ module.exports = {
     Account,
     Transaction,
     MonthlyBudget,
-    Notification
+    Notification,
+    Savings,
+    SavingsTransaction
 }

@@ -14,6 +14,7 @@ import BudgetView from '../views/BudgetView.vue'
 import ReportsView from '../views/ReportsView.vue'
 import SettingsView from '../views/SettingsView.vue'
 import NotFoundView from '../views/NotFoundView.vue'
+import SavingsView from '../views/SavingsView.vue'
 
 import api from '../services/api'
 
@@ -88,6 +89,20 @@ const routes = [
       requiresAuth: true
     }
   },
+
+  // ========================================
+// SAVINGS
+// ========================================
+
+{
+  path: '/savings',
+  name: 'savings',
+  component: SavingsView,
+
+  meta: {
+    requiresAuth: true
+  }
+},
 
 
   // ========================================

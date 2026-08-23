@@ -11,6 +11,9 @@ const { Op } = require("sequelize");
 const categoryRoutes =
     require("./routes/categoryRoutes");
 
+const savingsRoutes =
+    require("./routes/savingsRoutes");
+
 const {
     User,
     Category,
@@ -47,6 +50,11 @@ app.use(express.json());
 app.use(
     "/api/categories",
     categoryRoutes
+);
+
+app.use(
+    "/api/savings",
+    savingsRoutes
 );
 
 function generateToken(user) {
