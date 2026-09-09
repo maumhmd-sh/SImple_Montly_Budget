@@ -16,7 +16,7 @@
 
     <div>
 
-      © {{ new Date().getFullYear() }}
+      © 2025
 
     </div>
 

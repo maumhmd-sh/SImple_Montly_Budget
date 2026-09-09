@@ -33,6 +33,15 @@ const selectedSaving = ref(null)
 
 const transactionType = ref('deposit')
 
+// Form khusus untuk saldo awal pada detail tabungan.
+// Dipisahkan dari form create/edit agar tidak pernah bentrok saat render.
+const initialBalanceForm = ref({
+  initial_amount: '',
+  initial_date: getToday()
+})
+
+const initialBalanceSaving = ref(false)
+
 
 /*
 |--------------------------------------------------------------------------
@@ -46,6 +55,9 @@ const form = ref({
 
   target_amount: '',
   target_date: '',
+
+  initial_amount: '',
+initial_date: '',
 
   routine_enabled: false,
   routine_amount: '',
@@ -64,6 +76,7 @@ const transactionForm = ref({
     .slice(0, 10)
 })
 
+const accounts = ref([])
 
 /*
 |--------------------------------------------------------------------------
@@ -604,12 +617,14 @@ function resetForm() {
     target_amount: '',
     target_date: '',
 
+    initial_amount: '',
+    initial_date: getToday(),
+
     routine_enabled: false,
 
     routine_amount: '',
 
-    routine_frequency:
-      'monthly',
+    routine_frequency: 'monthly',
 
     routine_day: 1,
 
@@ -749,6 +764,7 @@ async function saveSaving() {
   }
 
 
+  
   /*
   |--------------------------------------------------------------------------
   | TARGET VALIDATION
@@ -887,39 +903,39 @@ async function saveSaving() {
 
     const payload = {
 
-      name,
+  name,
 
-      type:
-        form.value.type,
+  type:
+    form.value.type,
 
-      target_amount:
-        targetAmount,
+  target_amount:
+    targetAmount,
 
-      target_date:
-        form.value.type === 'target'
-          ? (
-              form.value.target_date ||
-              null
-            )
-          : null,
+  target_date:
+    form.value.type === 'target'
+      ? (
+          form.value.target_date ||
+          null
+        )
+      : null,
 
-      routine_amount:
-        routineAmount,
+  routine_amount:
+    routineAmount,
 
-      routine_frequency:
-        routineFrequency,
+  routine_frequency:
+    routineFrequency,
 
-      routine_day:
-        routineDay,
+  routine_day:
+    routineDay,
 
-      description:
-        String(
-          form.value.description ||
-          ''
-        ).trim() ||
-        null
+  description:
+    String(
+      form.value.description ||
+      ''
+    ).trim() ||
+    null
 
-    }
+}
 
 
     if (
@@ -1078,6 +1094,11 @@ async function openDetail(
   selectedSaving.value =
     savingData
 
+  initialBalanceForm.value = {
+    initial_amount: '',
+    initial_date: getToday()
+  }
+
   showDetailModal.value =
     true
 
@@ -1094,6 +1115,23 @@ async function openDetail(
       response.data?.data ||
       response.data
 
+    const openingBalance =
+      selectedSaving.value?.transactions?.find(
+        transaction =>
+          transaction.type === 'opening_balance'
+      )
+
+    initialBalanceForm.value = {
+      initial_amount:
+        openingBalance?.amount != null
+          ? Number(openingBalance.amount)
+          : '',
+      initial_date:
+        openingBalance?.transaction_date
+          ? String(openingBalance.transaction_date).slice(0, 10)
+          : getToday()
+    }
+
   } catch (error) {
 
     console.error(
@@ -1106,6 +1144,102 @@ async function openDetail(
       'Gagal mengambil detail tabungan.'
     )
 
+  }
+
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| SAVE INITIAL BALANCE
+|--------------------------------------------------------------------------
+*/
+
+async function saveInitialBalance() {
+
+  if (!selectedSaving.value?.id) {
+    return
+  }
+
+  clearMessages()
+
+  const amount = Number(
+    initialBalanceForm.value.initial_amount || 0
+  )
+
+  if (!Number.isFinite(amount) || amount < 0) {
+    showError('Saldo awal tidak valid.')
+    return
+  }
+
+  if (
+    selectedSaving.value.type === 'target' &&
+    amount > Number(selectedSaving.value.target_amount || 0)
+  ) {
+    showError('Saldo awal tidak boleh melebihi target tabungan.')
+    return
+  }
+
+  const date = amount > 0
+    ? (
+        initialBalanceForm.value.initial_date ||
+        getToday()
+      )
+    : null
+
+  if (amount > 0 && !date) {
+    showError('Tanggal saldo awal wajib diisi.')
+    return
+  }
+
+  initialBalanceSaving.value = true
+
+  try {
+
+    await api.put(
+      `/savings/${selectedSaving.value.id}`,
+      {
+        initial_amount: amount,
+        initial_date: date
+      }
+    )
+
+    await fetchSavings()
+    await refreshSelectedSaving()
+
+    const openingBalance =
+      selectedSaving.value?.transactions?.find(
+        transaction =>
+          transaction.type === 'opening_balance'
+      )
+
+    initialBalanceForm.value = {
+      initial_amount:
+        openingBalance?.amount != null
+          ? Number(openingBalance.amount)
+          : '',
+      initial_date:
+        openingBalance?.transaction_date
+          ? String(openingBalance.transaction_date).slice(0, 10)
+          : getToday()
+    }
+
+    showSuccess('Saldo awal berhasil disimpan.')
+
+  } catch (error) {
+
+    console.error(
+      'UPDATE INITIAL BALANCE /savings/:id:',
+      error
+    )
+
+    showError(
+      error.response?.data?.message ||
+      'Gagal menyimpan saldo awal.'
+    )
+
+  } finally {
+    initialBalanceSaving.value = false
   }
 
 }
@@ -1138,6 +1272,23 @@ async function refreshSelectedSaving() {
       response.data?.data ||
       response.data
 
+    const openingBalance =
+      selectedSaving.value?.transactions?.find(
+        transaction =>
+          transaction.type === 'opening_balance'
+      )
+
+    initialBalanceForm.value = {
+      initial_amount:
+        openingBalance?.amount != null
+          ? Number(openingBalance.amount)
+          : '',
+      initial_date:
+        openingBalance?.transaction_date
+          ? String(openingBalance.transaction_date).slice(0, 10)
+          : getToday()
+    }
+
   } catch (error) {
 
     console.error(
@@ -1149,6 +1300,32 @@ async function refreshSelectedSaving() {
 
 }
 
+// ---------------------------------------------------------------------------
+async function fetchAccounts() {
+
+  try {
+
+    const response =
+      await api.get('/accounts')
+
+    accounts.value =
+      Array.isArray(response.data)
+        ? response.data
+        : response.data?.data || []
+
+  } catch (error) {
+
+    console.error(
+      'GET /accounts:',
+      error
+    )
+
+    accounts.value = []
+
+  }
+
+}
+// ---------------------------------------------------------------------------
 
 /*
 |--------------------------------------------------------------------------
@@ -1195,16 +1372,18 @@ function openTransactionModal(
     type
 
 
-  transactionForm.value = {
+transactionForm.value = {
+
+    account_id: '',
 
     amount: '',
 
     description: '',
 
     transaction_date:
-      getToday()
+        getToday()
 
-  }
+}
 
 
   showTransactionModal.value =
@@ -1242,6 +1421,28 @@ async function submitTransaction() {
     Number(
       transactionForm.value.amount
     )
+
+    const accountId =
+  Number(
+    transactionForm.value
+      .account_id
+  )
+
+
+if (
+  !Number.isInteger(accountId) ||
+  accountId <= 0
+) {
+
+  showError(
+    transactionType.value === 'deposit'
+      ? 'Pilih sumber dana terlebih dahulu.'
+      : 'Pilih tujuan dana terlebih dahulu.'
+  )
+
+  return
+
+}
 
 
   if (
@@ -1351,27 +1552,30 @@ async function submitTransaction() {
 
     await api.post(
 
-      endpoint,
+  endpoint,
 
-      {
+  {
 
-        amount,
+    account_id:
+      accountId,
 
-        description:
-          String(
-            transactionForm.value
-              .description ||
-            ''
-          ).trim() ||
-          null,
+    amount,
 
-        transaction_date:
-          transactionForm.value
-            .transaction_date
+    description:
+      String(
+        transactionForm.value
+          .description ||
+          ''
+      ).trim() ||
+      null,
 
-      }
+    transaction_date:
+      transactionForm.value
+        .transaction_date
 
-    )
+  }
+
+)
 
 
     showTransactionModal.value =
@@ -1439,6 +1643,8 @@ function closeDetailModal() {
 onMounted(() => {
 
   fetchSavings()
+
+  fetchAccounts()
 
 })
 
@@ -2130,6 +2336,82 @@ onMounted(() => {
 
           </div>
 
+          <!-- ACCOUNT -->
+
+<div class="form-group">
+
+  <label>
+
+    {{
+      transactionType === 'deposit'
+        ? 'Sumber Dana'
+        : 'Tujuan Dana'
+    }}
+
+  </label>
+
+  <select
+    v-model="transactionForm.account_id"
+    required
+  >
+
+    <option value="">
+      {{
+        transactionType === 'deposit'
+          ? 'Pilih account sumber'
+          : 'Pilih account tujuan'
+      }}
+    </option>
+
+    <option
+      v-for="account in accounts"
+      :key="account.id"
+      :value="account.id"
+    >
+
+      {{ account.name }}
+      —
+      {{ formatMoney(account.balance) }}
+
+    </option>
+
+  </select>
+
+  <small class="input-help">
+
+    {{
+      transactionType === 'deposit'
+        ? 'Dana akan dipindahkan dari account ke tabungan.'
+        : 'Dana akan dipindahkan dari tabungan ke account.'
+    }}
+
+  </small>
+
+</div>
+
+
+<!-- AMOUNT -->
+
+<div class="form-group">
+
+  <label>
+    Nominal
+  </label>
+
+  <input
+    v-model.number="
+      transactionForm.amount
+    "
+    type="number"
+    min="1"
+    step="1"
+    inputmode="numeric"
+    placeholder="50000000"
+    required
+  />
+
+</div>
+
 
           <!-- TYPE -->
 
@@ -2592,6 +2874,57 @@ onMounted(() => {
               Nominal
             </label>
 
+<div class="mb-3">
+
+  <label class="form-label">
+
+    {{
+      transactionType === 'deposit'
+        ? 'Sumber Dana'
+        : 'Tujuan Dana'
+    }}
+
+  </label>
+
+  <select
+    v-model="transactionForm.account_id"
+    class="form-select"
+  >
+
+    <option value="">
+      {{
+        transactionType === 'deposit'
+          ? 'Pilih account sumber'
+          : 'Pilih account tujuan'
+      }}
+    </option>
+
+    <option
+      v-for="account in accounts"
+      :key="account.id"
+      :value="account.id"
+    >
+
+      {{ account.name }}
+      —
+      {{ formatMoney(account.balance) }}
+
+    </option>
+
+  </select>
+
+  <small class="text-muted">
+
+    {{
+      transactionType === 'deposit'
+        ? 'Dana akan dipindahkan dari account ke tabungan.'
+        : 'Dana akan dipindahkan dari tabungan ke account.'
+    }}
+
+  </small>
+
+</div>
+
             <input
               v-model.number="
                 transactionForm.amount
@@ -2974,6 +3307,62 @@ onMounted(() => {
 
         </div>
 
+<!-- INITIAL BALANCE -->
+
+<div class="form-group">
+
+  <label>
+
+    Saldo Awal
+
+    <small>
+      (opsional)
+    </small>
+
+  </label>
+
+  <input
+    v-model.number="
+      initialBalanceForm.initial_amount
+    "
+    type="number"
+    min="0"
+    step="1"
+    inputmode="numeric"
+    placeholder="Contoh: 5489000"
+  />
+
+  <small class="input-help">
+
+    Isi jika tabungan ini sudah memiliki saldo sebelum dicatat di aplikasi.
+    Saldo awal tidak akan mengurangi Cash, Bank, atau E-Wallet.
+
+  </small>
+
+</div>
+
+
+<!-- INITIAL DATE -->
+
+<div
+  v-if="
+    Number(initialBalanceForm.initial_amount || 0) > 0
+  "
+  class="form-group"
+>
+
+  <label>
+    Tanggal Saldo Awal
+  </label>
+
+  <input
+    v-model="
+      initialBalanceForm.initial_date
+    "
+    type="date"
+  />
+
+</div>
 
         <!-- ROUTINE -->
 
@@ -3104,10 +3493,11 @@ onMounted(() => {
 
                 <i
                   :class="
-                    transaction.type ===
-                    'deposit'
-                      ? 'bi bi-arrow-down-left'
-                      : 'bi bi-arrow-up-right'
+                    transaction.type === 'opening_balance'
+                      ? 'bi bi-wallet2'
+                      : transaction.type === 'deposit'
+                        ? 'bi bi-arrow-down-left'
+                        : 'bi bi-arrow-up-right'
                   "
                 ></i>
 
@@ -3119,10 +3509,11 @@ onMounted(() => {
                 <strong>
 
                   {{
-                    transaction.type ===
-                    'deposit'
-                      ? 'Deposit'
-                      : 'Withdrawal'
+                    transaction.type === 'opening_balance'
+                      ? 'Saldo Awal'
+                      : transaction.type === 'deposit'
+                        ? 'Deposit'
+                        : 'Withdrawal'
                   }}
 
                 </strong>
@@ -3159,10 +3550,11 @@ onMounted(() => {
               >
 
                 {{
-                  transaction.type ===
-                  'deposit'
-                    ? '+'
-                    : '-'
+                  transaction.type === 'opening_balance'
+                    ? ''
+                    : transaction.type === 'deposit'
+                      ? '+'
+                      : '-'
                 }}
 
                 {{
@@ -3183,6 +3575,26 @@ onMounted(() => {
         <!-- DETAIL ACTIONS -->
 
         <div class="modal-actions">
+
+          <button
+            type="button"
+            class="btn-primary"
+            :disabled="initialBalanceSaving"
+            @click="saveInitialBalance"
+          >
+            <i
+              :class="
+                initialBalanceSaving
+                  ? 'bi bi-arrow-repeat spin'
+                  : 'bi bi-save2'
+              "
+            ></i>
+            {{
+              initialBalanceSaving
+                ? 'Menyimpan...'
+                : 'Simpan Saldo Awal'
+            }}
+          </button>
 
           <button
             type="button"
@@ -5853,6 +6265,22 @@ onMounted(() => {
 
   }
 
+}
+
+
+.transaction-icon.opening_balance {
+  background: rgba(59, 130, 246, 0.12);
+  color: #2563eb;
+}
+
+.spin {
+  animation: savings-spin 0.8s linear infinite;
+}
+
+@keyframes savings-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 </style>

@@ -14,6 +14,11 @@ const categoryRoutes =
 const savingsRoutes =
     require("./routes/savingsRoutes");
 
+const SavingsTransaction =
+    require(
+        "./models/SavingsTransaction"
+    );
+
 const {
     User,
     Category,
@@ -3488,349 +3493,738 @@ app.post(
 */
 
 app.get(
-    "/api/dashboard",
-    auth,
-    async (req, res) => {
+"/api/dashboard",
+auth,
+async (req, res) => {
 
-        try {
+    try {
 
-            const month =
-                req.query.month ||
-                new Date()
-                    .toISOString()
-                    .slice(0, 7);
+        const month =
+            req.query.month ||
+            new Date()
+                .toISOString()
+                .slice(0, 7);
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | VALIDATE MONTH
+        |--------------------------------------------------------------------------
+        */
+
+        if (
+            typeof month !== "string" ||
+            !/^\d{4}-(0[1-9]|1[0-2])$/.test(month)
+        ) {
+
+            return res.status(400).json({
+                success: false,
+                message:
+                    "Bulan harus menggunakan format YYYY-MM."
+            });
+
+        }
+
+
+        const [
+            year,
+            monthNumber
+        ] =
+            month
+                .split("-")
+                .map(Number);
+
+
+        const monthRange =
+            getMonthRange(month);
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | GET DATA
+        |--------------------------------------------------------------------------
+        */
+
+        const [
+            incomes,
+            expenses,
+            transfers,
+            savingsTransactions,
+            budgets,
+            accounts
+        ] = await Promise.all([
 
 
             /*
-            |--------------------------------------------------------------------------
-            | VALIDATE MONTH
-            |--------------------------------------------------------------------------
+            --------------------------------------------------------------
+            | INCOME
+            --------------------------------------------------------------
             */
 
-            if (
-                typeof month !== "string" ||
-                !/^\d{4}-(0[1-9]|1[0-2])$/.test(month)
-            ) {
+            Transaction.findAll({
 
-                return res.status(400).json({
-                    success: false,
-                    message:
-                        "Bulan harus menggunakan format YYYY-MM."
-                });
+                where: {
+                    user_id:
+                        req.user.id,
+
+                    type:
+                        "income",
+
+                    transaction_date: {
+                        [Op.between]: [
+                            monthRange.start,
+                            monthRange.end
+                        ]
+                    }
+                },
+
+                include: [
+                    {
+                        model:
+                            Category,
+
+                        as:
+                            "category"
+                    },
+
+                    {
+                        model:
+                            Account,
+
+                        as:
+                            "account"
+                    }
+                ]
+
+            }),
+
+
+            /*
+            --------------------------------------------------------------
+            | EXPENSE
+            |
+            | Hanya expense asli.
+            | Transfer ke tabungan TIDAK masuk di sini.
+            --------------------------------------------------------------
+            */
+
+            Transaction.findAll({
+
+                where: {
+                    user_id:
+                        req.user.id,
+
+                    type:
+                        "expense",
+
+                    transaction_date: {
+                        [Op.between]: [
+                            monthRange.start,
+                            monthRange.end
+                        ]
+                    }
+                },
+
+                include: [
+                    {
+                        model:
+                            Category,
+
+                        as:
+                            "category"
+                    },
+
+                    {
+                        model:
+                            Account,
+
+                        as:
+                            "account"
+                    }
+                ]
+
+            }),
+
+
+            /*
+            --------------------------------------------------------------
+            | TRANSFER
+            |
+            | Tidak dihitung sebagai income atau expense.
+            --------------------------------------------------------------
+            */
+
+            Transaction.findAll({
+
+                where: {
+                    user_id:
+                        req.user.id,
+
+                    type:
+                        "transfer",
+
+                    transaction_date: {
+                        [Op.between]: [
+                            monthRange.start,
+                            monthRange.end
+                        ]
+                    }
+                },
+
+                include: [
+                    {
+                        model:
+                            Account,
+
+                        as:
+                            "account"
+                    }
+                ],
+
+                order: [
+                    [
+                        "transaction_date",
+                        "DESC"
+                    ],
+
+                    [
+                        "id",
+                        "DESC"
+                    ]
+                ]
+
+            }),
+
+
+            /*
+            --------------------------------------------------------------
+            | SAVINGS TRANSACTIONS
+            |
+            | Digunakan untuk mengetahui arah transfer:
+            | deposit    = uang masuk tabungan
+            | withdrawal = uang keluar tabungan
+            --------------------------------------------------------------
+            */
+
+            SavingsTransaction.findAll({
+
+                where: {
+                    user_id:
+                        req.user.id,
+
+                    transaction_date: {
+                        [Op.between]: [
+                            monthRange.start,
+                            monthRange.end
+                        ]
+                    }
+                },
+
+                order: [
+                    [
+                        "transaction_date",
+                        "DESC"
+                    ],
+
+                    [
+                        "id",
+                        "DESC"
+                    ]
+                ]
+
+            }),
+
+
+            /*
+            --------------------------------------------------------------
+            | MONTHLY BUDGET
+            --------------------------------------------------------------
+            */
+
+            MonthlyBudget.findAll({
+
+                where: {
+                    user_id:
+                        req.user.id,
+
+                    month:
+                        monthNumber,
+
+                    year
+                },
+
+                include: [
+                    {
+                        model:
+                            Category,
+
+                        as:
+                            "category"
+                    }
+                ]
+
+            }),
+
+
+            /*
+            --------------------------------------------------------------
+            | ACCOUNTS
+            --------------------------------------------------------------
+            */
+
+            Account.findAll({
+
+                where: {
+                    user_id:
+                        req.user.id
+                },
+
+                order: [
+                    [
+                        "name",
+                        "ASC"
+                    ]
+                ]
+
+            })
+
+        ]);
+
+
+ /*
+|--------------------------------------------------------------------------
+| MAIN TOTALS
+|--------------------------------------------------------------------------
+*/
+
+const totalIncome =
+    sumRows(
+        incomes
+    );
+
+
+/*
+|--------------------------------------------------------------------------
+| EXPENSE
+|--------------------------------------------------------------------------
+|
+| Hanya transaksi type = expense.
+| Transfer tidak ikut dihitung sebagai pengeluaran.
+|
+*/
+
+const totalExpense =
+    sumRows(
+        expenses
+    );
+
+
+/*
+|--------------------------------------------------------------------------
+| TOTAL TRANSFER
+|--------------------------------------------------------------------------
+|
+| Ini hanya informasi aktivitas transfer.
+| Tidak dihitung sebagai income atau expense.
+|
+*/
+
+const totalTransfer =
+    sumRows(
+        transfers
+    );
+
+
+/*
+|--------------------------------------------------------------------------
+| SAVINGS DEPOSIT
+|--------------------------------------------------------------------------
+|
+| Total uang yang masuk ke tabungan.
+|
+*/
+
+const totalSavingsDeposit =
+    savingsTransactions
+        .filter(
+            transaction =>
+                transaction.type ===
+                "deposit"
+        )
+        .reduce(
+            (
+                total,
+                transaction
+            ) =>
+                total +
+                Number(
+                    transaction.amount ||
+                    0
+                ),
+            0
+        );
+
+
+/*
+|--------------------------------------------------------------------------
+| SAVINGS WITHDRAWAL
+|--------------------------------------------------------------------------
+|
+| Total uang yang keluar dari tabungan
+| dan kembali ke account.
+|
+*/
+
+const totalSavingsWithdrawal =
+    savingsTransactions
+        .filter(
+            transaction =>
+                transaction.type ===
+                "withdrawal"
+        )
+        .reduce(
+            (
+                total,
+                transaction
+            ) =>
+                total +
+                Number(
+                    transaction.amount ||
+                    0
+                ),
+            0
+        );
+
+
+/*
+|--------------------------------------------------------------------------
+| NET SAVINGS MOVEMENT
+|--------------------------------------------------------------------------
+|
+| Positif:
+| Uang lebih banyak masuk ke tabungan.
+|
+| Negatif:
+| Uang lebih banyak keluar dari tabungan.
+|
+*/
+
+const netSavingsMovement =
+    totalSavingsDeposit -
+    totalSavingsWithdrawal;
+
+
+/*
+|--------------------------------------------------------------------------
+| NET CASHFLOW
+|--------------------------------------------------------------------------
+|
+| Cashflow aktivitas utama:
+|
+| Income - Expense
+|
+| Transfer tabungan tidak dianggap expense.
+|
+*/
+
+const netCashflow =
+    totalIncome -
+    totalExpense;
+
+
+/*
+|--------------------------------------------------------------------------
+| SALDO TERSEDIA
+|--------------------------------------------------------------------------
+|
+| Rumus:
+|
+| Income
+| - Expense
+| - Uang masuk tabungan
+| + Uang keluar dari tabungan
+|
+| atau:
+|
+| Income - Expense - Net Savings Movement
+|
+*/
+
+const balance =
+    totalIncome -
+    totalExpense -
+    netSavingsMovement;
+
+        const saving =
+            netCashflow;
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | EXPENSE RATE
+        |--------------------------------------------------------------------------
+        */
+
+        const expenseRate =
+            totalIncome > 0
+                ? Math.round(
+                    totalExpense /
+                    totalIncome *
+                    100
+                )
+                : 0;
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | SAVING RATE
+        |
+        | Berdasarkan cashflow operasional.
+        |--------------------------------------------------------------------------
+        */
+
+        const savingRate =
+            totalIncome > 0
+                ? Math.round(
+                    netCashflow /
+                    totalIncome *
+                    100
+                )
+                : 0;
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | CATEGORY EXPENSES
+        |--------------------------------------------------------------------------
+        */
+
+        const categoryMap =
+            {};
+
+
+        expenses.forEach(
+            expense => {
+
+                const name =
+                    expense.category?.name ||
+                    "Lainnya";
+
+
+                categoryMap[
+                    name
+                ] =
+                    (
+                        categoryMap[
+                            name
+                        ] ||
+                        0
+                    ) +
+                    Number(
+                        expense.amount ||
+                        0
+                    );
 
             }
+        );
 
 
-            const [
-                year,
-                monthNumber
-            ] =
-                month
-                    .split("-")
-                    .map(Number);
+        const categoryExpenses =
+            Object.entries(
+                categoryMap
+            )
+                .map(
+                    (
+                        [
+                            name,
+                            amount
+                        ]
+                    ) => ({
 
+                        name,
 
-            /*
-            |--------------------------------------------------------------------------
-            | GET DATA
-            |--------------------------------------------------------------------------
-            */
+                        amount
 
-            const [
-                incomes,
-                expenses,
-                budgets,
-                accounts
-            ] = await Promise.all([
-
-                Transaction.findAll({
-
-                    where: {
-                        user_id: req.user.id,
-                        type: "income",
-
-                        transaction_date: {
-                            [Op.between]: [
-                                getMonthRange(month).start,
-                                getMonthRange(month).end
-                            ]
-                        }
-                    },
-
-                    include: [
-                        {
-                            model: Category,
-                            as: "category"
-                        },
-
-                        {
-                            model: Account,
-                            as: "account"
-                        }
-                    ]
-
-                }),
-
-
-                Transaction.findAll({
-
-                    where: {
-                        user_id: req.user.id,
-                        type: "expense",
-
-                        transaction_date: {
-                            [Op.between]: [
-                                getMonthRange(month).start,
-                                getMonthRange(month).end
-                            ]
-                        }
-                    },
-
-                    include: [
-                        {
-                            model: Category,
-                            as: "category"
-                        },
-
-                        {
-                            model: Account,
-                            as: "account"
-                        }
-                    ]
-
-                }),
-
-
-                MonthlyBudget.findAll({
-
-                    where: {
-                        user_id: req.user.id,
-                        month: monthNumber,
-                        year
-                    },
-
-                    include: [
-                        {
-                            model: Category,
-                            as: "category"
-                        }
-                    ]
-
-                }),
-
-
-                Account.findAll({
-
-                    where: {
-                        user_id: req.user.id
-                    },
-
-                    order: [
-                        ["name", "ASC"]
-                    ]
-
-                })
-
-            ]);
-
-
-            /*
-            |--------------------------------------------------------------------------
-            | TOTALS
-            |--------------------------------------------------------------------------
-            */
-
-            const totalIncome =
-                sumRows(incomes);
-
-
-            const totalExpense =
-                sumRows(expenses);
-
-
-            const balance =
-                sumRows(
-                    accounts.map(
-                        account => ({
-                            amount:
-                                account.balance
-                        })
-                    )
+                    })
+                )
+                .sort(
+                    (
+                        a,
+                        b
+                    ) =>
+                        b.amount -
+                        a.amount
                 );
 
 
-            const saving =
-                totalIncome -
-                totalExpense;
+        /*
+        |--------------------------------------------------------------------------
+        | BUDGET PROGRESS
+        |--------------------------------------------------------------------------
+        */
 
+        const budgetProgress =
+            budgets.map(
+                budget => {
 
-            const expenseRate =
-                totalIncome > 0
-                    ? Math.round(
-                        totalExpense /
-                        totalIncome *
-                        100
-                    )
-                    : 0;
-
-
-            const savingRate =
-                totalIncome > 0
-                    ? Math.round(
-                        saving /
-                        totalIncome *
-                        100
-                    )
-                    : 0;
-
-
-            /*
-            |--------------------------------------------------------------------------
-            | CATEGORY EXPENSES
-            |--------------------------------------------------------------------------
-            */
-
-            const categoryMap = {};
-
-
-            expenses.forEach(
-                expense => {
-
-                    const name =
-                        expense.category?.name ||
+                    const categoryName =
+                        budget.category?.name ||
                         "Lainnya";
 
 
-                    categoryMap[name] =
-                        (categoryMap[name] || 0) +
-                        Number(expense.amount);
+                    const spent =
+                        categoryMap[
+                            categoryName
+                        ] ||
+                        0;
+
+
+                    const limit =
+                        Number(
+                            budget.amount ||
+                            0
+                        );
+
+
+                    const percentage =
+                        limit > 0
+                            ? Math.round(
+                                spent /
+                                limit *
+                                100
+                            )
+                            : 0;
+
+
+                    return {
+
+                        id:
+                            budget.id,
+
+                        category:
+                            categoryName,
+
+                        budget:
+                            limit,
+
+                        spent,
+
+                        percentage
+
+                    };
 
                 }
             );
 
 
-            const categoryExpenses =
-                Object.entries(
-                    categoryMap
-                ).map(
-                    ([name, amount]) => ({
-                        name,
-                        amount
-                    })
-                );
+        /*
+        |--------------------------------------------------------------------------
+        | RESPONSE
+        |--------------------------------------------------------------------------
+        */
+
+        return res.json({
+
+            success:
+                true,
 
 
             /*
-            |--------------------------------------------------------------------------
-            | BUDGET PROGRESS
-            |--------------------------------------------------------------------------
+            --------------------------------------------------------------
+            | SELECTED MONTH
+            --------------------------------------------------------------
             */
 
-            const budgetProgress =
-                budgets.map(
-                    budget => {
-
-                        const categoryName =
-                            budget.category?.name ||
-                            "Lainnya";
-
-
-                        const spent =
-                            categoryMap[
-                                categoryName
-                            ] || 0;
-
-
-                        const limit =
-                            Number(
-                                budget.amount
-                            );
-
-
-                        const percentage =
-                            limit > 0
-                                ? Math.round(
-                                    spent /
-                                    limit *
-                                    100
-                                )
-                                : 0;
-
-
-                        return {
-
-                            id:
-                                budget.id,
-
-                            category:
-                                categoryName,
-
-                            budget:
-                                limit,
-
-                            spent,
-
-                            percentage
-
-                        };
-
-                    }
-                );
+            month,
 
 
             /*
-            |--------------------------------------------------------------------------
-            | RESPONSE
-            |--------------------------------------------------------------------------
+            --------------------------------------------------------------
+            | MAIN FINANCIAL SUMMARY
+            --------------------------------------------------------------
             */
 
-            return res.json({
+            totalIncome,
 
-                success: true,
+            totalExpense,
 
-                month,
+            netCashflow,
 
-                totalIncome,
+            saving,
 
-                totalExpense,
-
-                balance,
-
-                saving,
-
-                expenseRate,
-
-                savingRate,
-
-                categoryExpenses,
-
-                budgetProgress,
-
-                accounts
-
-            });
-
-        } catch (error) {
-
-            console.error(
-                "GET /api/dashboard:",
-                error
-            );
+            balance,
 
 
-            return res.status(500).json({
+            /*
+            --------------------------------------------------------------
+            | RATES
+            --------------------------------------------------------------
+            */
 
-                success: false,
+            expenseRate,
 
-                message:
-                    "Gagal mengambil data dashboard."
+            savingRate,
 
-            });
 
-        }
+            /*
+            --------------------------------------------------------------
+            | TRANSFER / SAVINGS MOVEMENT
+            --------------------------------------------------------------
+            */
+
+            totalTransfer,
+
+            totalSavingsDeposit,
+
+            totalSavingsWithdrawal,
+
+            netSavingsMovement,
+
+
+            /*
+            --------------------------------------------------------------
+            | CATEGORY & BUDGET
+            --------------------------------------------------------------
+            */
+
+            categoryExpenses,
+
+            budgetProgress,
+
+
+            /*
+            --------------------------------------------------------------
+            | RAW DATA
+            --------------------------------------------------------------
+            */
+
+            accounts,
+
+            transfers
+
+        });
+
+    } catch (error) {
+
+        console.error(
+            "GET /api/dashboard:",
+            error
+        );
+
+
+        return res.status(500).json({
+
+            success:
+                false,
+
+            message:
+                "Terjadi kesalahan saat mengambil data dashboard."
+
+        });
 
     }
-);
+
+});
 
 
 /*

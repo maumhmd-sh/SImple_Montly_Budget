@@ -1,6 +1,8 @@
 const {
     Savings,
     SavingsTransaction,
+    Account,
+    Transaction,
     Notification
 } = require('../models')
 
@@ -506,12 +508,17 @@ async function getSaving(req, res) {
 
 async function createSaving(req, res) {
 
+    const dbTransaction =
+        await sequelize.transaction()
+
     try {
 
         const {
             name,
             type,
             target_amount,
+            initial_amount,
+            initial_date,
             routine_amount,
             routine_frequency,
             routine_day,
@@ -529,7 +536,7 @@ async function createSaving(req, res) {
 
         /*
         |--------------------------------------------------------------------------
-        | Name
+        | NAME
         |--------------------------------------------------------------------------
         */
 
@@ -547,7 +554,7 @@ async function createSaving(req, res) {
 
         /*
         |--------------------------------------------------------------------------
-        | Type
+        | TYPE
         |--------------------------------------------------------------------------
         */
 
@@ -561,7 +568,7 @@ async function createSaving(req, res) {
         ) {
 
             errors.push(
-                'Tipe tabungan tidak valid. Gunakan target atau free.'
+                'Tipe tabungan tidak valid.'
             )
 
         }
@@ -569,7 +576,7 @@ async function createSaving(req, res) {
 
         /*
         |--------------------------------------------------------------------------
-        | Target Amount
+        | TARGET AMOUNT
         |--------------------------------------------------------------------------
         */
 
@@ -599,25 +606,69 @@ async function createSaving(req, res) {
 
             }
 
-        } else {
+        }
 
-            /*
-            |--------------------------------------------------------------------------
-            | FREE SAVING
-            |--------------------------------------------------------------------------
-            |
-            | Free saving tidak membutuhkan target.
-            |
-            */
 
-            target = 0
+        /*
+        |--------------------------------------------------------------------------
+        | INITIAL BALANCE
+        |--------------------------------------------------------------------------
+        */
+
+        let initialAmount = 0
+
+
+        if (
+            initial_amount !== undefined &&
+            initial_amount !== null &&
+            initial_amount !== ''
+        ) {
+
+            initialAmount =
+                toNumber(
+                    initial_amount
+                )
+
+
+            if (
+                !Number.isFinite(
+                    initialAmount
+                ) ||
+                initialAmount < 0
+            ) {
+
+                errors.push(
+                    'Saldo awal tidak valid.'
+                )
+
+            }
 
         }
 
 
         /*
         |--------------------------------------------------------------------------
-        | Routine
+        | TARGET VALIDATION
+        |--------------------------------------------------------------------------
+        */
+
+        if (
+            savingType === 'target' &&
+            Number.isFinite(target) &&
+            Number.isFinite(initialAmount) &&
+            initialAmount > target
+        ) {
+
+            errors.push(
+                'Saldo awal tidak boleh lebih besar dari target tabungan.'
+            )
+
+        }
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | ROUTINE
         |--------------------------------------------------------------------------
         */
 
@@ -625,7 +676,9 @@ async function createSaving(req, res) {
             validateRoutine({
 
                 routine_amount,
+
                 routine_frequency,
+
                 routine_day
 
             })
@@ -638,13 +691,15 @@ async function createSaving(req, res) {
 
         /*
         |--------------------------------------------------------------------------
-        | Return Validation Error
+        | VALIDATION ERROR
         |--------------------------------------------------------------------------
         */
 
         if (
             errors.length
         ) {
+
+            await dbTransaction.rollback()
 
             return res.status(400).json({
 
@@ -663,7 +718,7 @@ async function createSaving(req, res) {
 
         /*
         |--------------------------------------------------------------------------
-        | Create
+        | CREATE SAVING
         |--------------------------------------------------------------------------
         */
 
@@ -682,8 +737,18 @@ async function createSaving(req, res) {
                 target_amount:
                     target,
 
+                /*
+                |--------------------------------------------------------------------------
+                | IMPORTANT
+                |
+                | Saldo awal langsung masuk ke tabungan.
+                |
+                | TIDAK mengurangi account Cash / Bank / E-Wallet.
+                |--------------------------------------------------------------------------
+                */
+
                 current_amount:
-                    0,
+                    initialAmount,
 
                 routine_amount:
                     routine.amount,
@@ -706,25 +771,93 @@ async function createSaving(req, res) {
                         : null,
 
                 status:
-                    'active'
+                    (
+                        savingType === 'target' &&
+                        target > 0 &&
+                        initialAmount >= target
+                    )
+                        ? 'completed'
+                        : 'active'
+
+            }, {
+
+                transaction:
+                    dbTransaction
 
             })
 
 
         /*
         |--------------------------------------------------------------------------
-        | Notification
+        | OPENING BALANCE TRANSACTION
+        |--------------------------------------------------------------------------
+        |
+        | Dicatat sebagai riwayat khusus.
+        |
+        | Tidak dianggap:
+        |
+        | income
+        | expense
+        | deposit bulanan
+        | transfer dari account
         |--------------------------------------------------------------------------
         */
 
-        if (Notification) {
+        if (
+            initialAmount > 0
+        ) {
+
+            await SavingsTransaction.create({
+
+                user_id:
+                    req.user.id,
+
+                saving_id:
+                    saving.id,
+
+                type:
+                    'opening_balance',
+
+                amount:
+                    initialAmount,
+
+                description:
+                    'Saldo awal sebelum menggunakan aplikasi.',
+
+                transaction_date:
+                    initial_date ||
+                    new Date()
+
+            }, {
+
+                transaction:
+                    dbTransaction
+
+            })
+
+        }
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | NOTIFICATION
+        |--------------------------------------------------------------------------
+        */
+
+        if (
+            Notification
+        ) {
 
             const notificationMessage =
-                savingType === 'target'
+                initialAmount > 0
 
-                    ? `Tabungan "${saving.name}" berhasil dibuat dengan target ${formatRupiah(target)}.`
+                    ? `Tabungan "${saving.name}" berhasil dibuat dengan saldo awal ${formatRupiah(initialAmount)}.`
 
-                    : `Tabungan bebas "${saving.name}" berhasil dibuat.`
+                    : savingType === 'target'
+
+                        ? `Tabungan "${saving.name}" berhasil dibuat dengan target ${formatRupiah(target)}.`
+
+                        : `Tabungan bebas "${saving.name}" berhasil dibuat.`
 
 
             await Notification.create({
@@ -744,9 +877,23 @@ async function createSaving(req, res) {
                 is_read:
                     false
 
+            }, {
+
+                transaction:
+                    dbTransaction
+
             })
 
         }
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | COMMIT
+        |--------------------------------------------------------------------------
+        */
+
+        await dbTransaction.commit()
 
 
         return res.status(201).json({
@@ -755,7 +902,11 @@ async function createSaving(req, res) {
                 true,
 
             message:
-                'Tabungan berhasil dibuat.',
+                initialAmount > 0
+
+                    ? 'Tabungan berhasil dibuat dengan saldo awal.'
+
+                    : 'Tabungan berhasil dibuat.',
 
             data:
                 saving
@@ -765,10 +916,13 @@ async function createSaving(req, res) {
 
     } catch (error) {
 
+        await dbTransaction.rollback()
+
         console.error(
             'CREATE SAVING ERROR:',
             error
         )
+
 
         return res.status(500).json({
 
@@ -793,6 +947,9 @@ async function createSaving(req, res) {
 
 async function updateSaving(req, res) {
 
+    const dbTransaction =
+        await sequelize.transaction()
+
     try {
 
         const saving =
@@ -806,12 +963,20 @@ async function updateSaving(req, res) {
                     user_id:
                         req.user.id
 
-                }
+                },
+
+                transaction:
+                    dbTransaction,
+
+                lock:
+                    dbTransaction.LOCK.UPDATE
 
             })
 
 
         if (!saving) {
+
+            await dbTransaction.rollback()
 
             return res.status(404).json({
 
@@ -830,6 +995,8 @@ async function updateSaving(req, res) {
             name,
             type,
             target_amount,
+            initial_amount,
+            initial_date,
             routine_amount,
             routine_frequency,
             routine_day,
@@ -841,7 +1008,7 @@ async function updateSaving(req, res) {
 
         /*
         |--------------------------------------------------------------------------
-        | Type
+        | TYPE
         |--------------------------------------------------------------------------
         */
 
@@ -868,6 +1035,8 @@ async function updateSaving(req, res) {
                 )
             ) {
 
+                await dbTransaction.rollback()
+
                 return res.status(400).json({
 
                     success:
@@ -885,7 +1054,7 @@ async function updateSaving(req, res) {
 
         /*
         |--------------------------------------------------------------------------
-        | Name
+        | NAME
         |--------------------------------------------------------------------------
         */
 
@@ -896,6 +1065,8 @@ async function updateSaving(req, res) {
             if (
                 !String(name).trim()
             ) {
+
+                await dbTransaction.rollback()
 
                 return res.status(400).json({
 
@@ -918,7 +1089,7 @@ async function updateSaving(req, res) {
 
         /*
         |--------------------------------------------------------------------------
-        | Target
+        | TARGET
         |--------------------------------------------------------------------------
         */
 
@@ -926,25 +1097,12 @@ async function updateSaving(req, res) {
             savingType === 'free'
         ) {
 
-            /*
-            |--------------------------------------------------------------------------
-            | Free saving tidak menggunakan target.
-            |--------------------------------------------------------------------------
-            */
-
             saving.type =
                 'free'
 
             saving.target_amount =
                 0
 
-
-            /*
-            |--------------------------------------------------------------------------
-            | Jika sebelumnya completed,
-            | free saving harus tetap active.
-            |--------------------------------------------------------------------------
-            */
 
             if (
                 saving.status === 'completed'
@@ -972,11 +1130,11 @@ async function updateSaving(req, res) {
 
 
                 if (
-                    !Number.isFinite(
-                        target
-                    ) ||
+                    !Number.isFinite(target) ||
                     target <= 0
                 ) {
+
+                    await dbTransaction.rollback()
 
                     return res.status(400).json({
 
@@ -998,6 +1156,8 @@ async function updateSaving(req, res) {
                     )
                 ) {
 
+                    await dbTransaction.rollback()
+
                     return res.status(400).json({
 
                         success:
@@ -1017,21 +1177,10 @@ async function updateSaving(req, res) {
             }
 
 
-            /*
-            |--------------------------------------------------------------------------
-            | Recalculate completed status
-            |--------------------------------------------------------------------------
-            */
-
             if (
-                Number(
-                    saving.target_amount
-                ) > 0 &&
-                Number(
-                    saving.current_amount
-                ) >= Number(
-                    saving.target_amount
-                )
+                Number(saving.target_amount) > 0 &&
+                Number(saving.current_amount) >=
+                    Number(saving.target_amount)
             ) {
 
                 saving.status =
@@ -1044,7 +1193,342 @@ async function updateSaving(req, res) {
 
         /*
         |--------------------------------------------------------------------------
-        | Routine
+        | SALDO AWAL
+        |--------------------------------------------------------------------------
+        |
+        | Saldo awal bukan deposit biasa.
+        |
+        | Tidak mempengaruhi account.
+        | Tidak membuat Transaction transfer.
+        |
+        | Hanya mengubah current_amount berdasarkan
+        | selisih saldo awal lama dan saldo awal baru.
+        |
+        |--------------------------------------------------------------------------
+        */
+
+        if (
+            initial_amount !== undefined ||
+            initial_date !== undefined
+        ) {
+
+            const openingTransaction =
+                await SavingsTransaction.findOne({
+
+                    where: {
+
+                        saving_id:
+                            saving.id,
+
+                        user_id:
+                            req.user.id,
+
+                        type:
+                            'opening_balance'
+
+                    },
+
+                    order: [
+                        [
+                            'id',
+                            'ASC'
+                        ]
+                    ],
+
+                    transaction:
+                        dbTransaction,
+
+                    lock:
+                        dbTransaction.LOCK.UPDATE
+
+                })
+
+
+            const oldOpeningAmount =
+                openingTransaction
+                    ? Number(
+                        openingTransaction.amount
+                    )
+                    : 0
+
+
+            let newOpeningAmount =
+                oldOpeningAmount
+
+
+            /*
+            |--------------------------------------------------------------------------
+            | UPDATE NOMINAL SALDO AWAL
+            |--------------------------------------------------------------------------
+            */
+
+            if (
+                initial_amount !== undefined
+            ) {
+
+                newOpeningAmount =
+                    toNumber(
+                        initial_amount
+                    )
+
+
+                if (
+                    !Number.isFinite(
+                        newOpeningAmount
+                    ) ||
+                    newOpeningAmount < 0
+                ) {
+
+                    await dbTransaction.rollback()
+
+                    return res.status(400).json({
+
+                        success:
+                            false,
+
+                        message:
+                            'Saldo awal tidak valid.'
+
+                    })
+
+                }
+
+
+                /*
+                |------------------------------------------------------------------
+                | TARGET VALIDATION
+                |------------------------------------------------------------------
+                */
+
+                if (
+                    savingType === 'target' &&
+                    Number(saving.target_amount) > 0 &&
+                    newOpeningAmount >
+                        Number(saving.target_amount)
+                ) {
+
+                    await dbTransaction.rollback()
+
+                    return res.status(400).json({
+
+                        success:
+                            false,
+
+                        message:
+                            'Saldo awal tidak boleh lebih besar dari target tabungan.'
+
+                    })
+
+                }
+
+
+                /*
+                |------------------------------------------------------------------
+                | CURRENT AMOUNT
+                |------------------------------------------------------------------
+                */
+
+                const difference =
+                    newOpeningAmount -
+                    oldOpeningAmount
+
+
+                const newCurrentAmount =
+                    Number(
+                        saving.current_amount
+                    ) +
+                    difference
+
+
+                /*
+                |------------------------------------------------------------------
+                | JANGAN BOLEH NEGATIF
+                |------------------------------------------------------------------
+                */
+
+                if (
+                    newCurrentAmount < 0
+                ) {
+
+                    await dbTransaction.rollback()
+
+                    return res.status(400).json({
+
+                        success:
+                            false,
+
+                        message:
+                            'Saldo awal baru terlalu kecil karena saldo tabungan saat ini sudah digunakan oleh transaksi sebelumnya.'
+
+                    })
+
+                }
+
+
+                saving.current_amount =
+                    newCurrentAmount
+
+
+                /*
+                |------------------------------------------------------------------
+                | UPDATE / CREATE / DELETE OPENING TRANSACTION
+                |------------------------------------------------------------------
+                */
+
+                if (
+                    newOpeningAmount > 0
+                ) {
+
+                    if (
+                        openingTransaction
+                    ) {
+
+                        openingTransaction.amount =
+                            newOpeningAmount
+
+                        openingTransaction.description =
+                            'Saldo awal sebelum menggunakan aplikasi.'
+
+                        if (
+                            initial_date !== undefined
+                        ) {
+
+                            openingTransaction.transaction_date =
+                                initial_date ||
+                                new Date()
+
+                        }
+
+
+                        await openingTransaction.save({
+
+                            transaction:
+                                dbTransaction
+
+                        })
+
+                    } else {
+
+                        await SavingsTransaction.create({
+
+                            user_id:
+                                req.user.id,
+
+                            saving_id:
+                                saving.id,
+
+                            type:
+                                'opening_balance',
+
+                            amount:
+                                newOpeningAmount,
+
+                            description:
+                                'Saldo awal sebelum menggunakan aplikasi.',
+
+                            transaction_date:
+                                initial_date ||
+                                new Date()
+
+                        }, {
+
+                            transaction:
+                                dbTransaction
+
+                        })
+
+                    }
+
+                } else {
+
+                    /*
+                    |----------------------------------------------------------------
+                    | Jika saldo awal menjadi 0,
+                    | hapus transaksi opening_balance.
+                    |----------------------------------------------------------------
+                    */
+
+                    if (
+                        openingTransaction
+                    ) {
+
+                        await openingTransaction.destroy({
+
+                            transaction:
+                                dbTransaction
+
+                        })
+
+                    }
+
+                }
+
+            } else {
+
+                /*
+                |--------------------------------------------------------------------------
+                | HANYA UPDATE TANGGAL
+                |--------------------------------------------------------------------------
+                */
+
+                if (
+                    openingTransaction &&
+                    initial_date !== undefined
+                ) {
+
+                    openingTransaction.transaction_date =
+                        initial_date ||
+                        new Date()
+
+
+                    await openingTransaction.save({
+
+                        transaction:
+                            dbTransaction
+
+                    })
+
+                }
+
+            }
+
+
+            /*
+            |--------------------------------------------------------------------------
+            | RECALCULATE STATUS
+            |--------------------------------------------------------------------------
+            */
+
+            if (
+                saving.type === 'target' &&
+                Number(saving.target_amount) > 0 &&
+                Number(saving.current_amount) >=
+                    Number(saving.target_amount)
+            ) {
+
+                saving.status =
+                    'completed'
+
+            } else if (
+                saving.status === 'completed' &&
+                (
+                    saving.type === 'free' ||
+                    Number(saving.current_amount) <
+                        Number(saving.target_amount)
+                )
+            ) {
+
+                saving.status =
+                    'active'
+
+            }
+
+        }
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | ROUTINE
         |--------------------------------------------------------------------------
         */
 
@@ -1073,6 +1557,8 @@ async function updateSaving(req, res) {
             routine.errors.length
         ) {
 
+            await dbTransaction.rollback()
+
             return res.status(400).json({
 
                 success:
@@ -1088,12 +1574,6 @@ async function updateSaving(req, res) {
 
         }
 
-
-        /*
-        |--------------------------------------------------------------------------
-        | Only update routine fields when supplied
-        |--------------------------------------------------------------------------
-        */
 
         if (
             routine_amount !== undefined
@@ -1127,7 +1607,7 @@ async function updateSaving(req, res) {
 
         /*
         |--------------------------------------------------------------------------
-        | Target Date
+        | TARGET DATE
         |--------------------------------------------------------------------------
         */
 
@@ -1144,7 +1624,7 @@ async function updateSaving(req, res) {
 
         /*
         |--------------------------------------------------------------------------
-        | Description
+        | DESCRIPTION
         |--------------------------------------------------------------------------
         */
 
@@ -1164,7 +1644,7 @@ async function updateSaving(req, res) {
 
         /*
         |--------------------------------------------------------------------------
-        | Status
+        | STATUS
         |--------------------------------------------------------------------------
         */
 
@@ -1182,6 +1662,8 @@ async function updateSaving(req, res) {
                 )
             ) {
 
+                await dbTransaction.rollback()
+
                 return res.status(400).json({
 
                     success:
@@ -1195,16 +1677,12 @@ async function updateSaving(req, res) {
             }
 
 
-            /*
-            |--------------------------------------------------------------------------
-            | Free saving tidak boleh dipaksa completed
-            |--------------------------------------------------------------------------
-            */
-
             if (
                 savingType === 'free' &&
                 status === 'completed'
             ) {
+
+                await dbTransaction.rollback()
 
                 return res.status(400).json({
 
@@ -1225,7 +1703,27 @@ async function updateSaving(req, res) {
         }
 
 
-        await saving.save()
+        /*
+        |--------------------------------------------------------------------------
+        | SAVE
+        |--------------------------------------------------------------------------
+        */
+
+        await saving.save({
+
+            transaction:
+                dbTransaction
+
+        })
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | COMMIT
+        |--------------------------------------------------------------------------
+        */
+
+        await dbTransaction.commit()
 
 
         return res.json({
@@ -1244,10 +1742,18 @@ async function updateSaving(req, res) {
 
     } catch (error) {
 
+        try {
+
+            await dbTransaction.rollback()
+
+        } catch {}
+
+
         console.error(
             'UPDATE SAVING ERROR:',
             error
         )
+
 
         return res.status(500).json({
 
@@ -1377,70 +1883,13 @@ async function deleteSaving(req, res) {
 
 async function depositSaving(req, res) {
 
-    const transaction =
+    const dbTransaction =
         await sequelize.transaction()
-
 
     try {
 
-        const saving =
-            await Savings.findOne({
-
-                where: {
-
-                    id:
-                        req.params.id,
-
-                    user_id:
-                        req.user.id
-
-                },
-
-                transaction,
-
-                lock:
-                    transaction.LOCK.UPDATE
-
-            })
-
-
-        if (!saving) {
-
-            await transaction.rollback()
-
-            return res.status(404).json({
-
-                success:
-                    false,
-
-                message:
-                    'Tabungan tidak ditemukan.'
-
-            })
-
-        }
-
-
-        if (
-            saving.status === 'cancelled'
-        ) {
-
-            await transaction.rollback()
-
-            return res.status(400).json({
-
-                success:
-                    false,
-
-                message:
-                    'Tabungan sudah dibatalkan.'
-
-            })
-
-        }
-
-
         const {
+            account_id,
             amount,
             description,
             transaction_date
@@ -1450,62 +1899,149 @@ async function depositSaving(req, res) {
         const depositAmount =
             toNumber(amount)
 
+        const accountId =
+            Number(account_id)
+
 
         if (
-            !Number.isFinite(
-                depositAmount
-            ) ||
+            !Number.isFinite(depositAmount) ||
             depositAmount <= 0
         ) {
 
-            await transaction.rollback()
+            await dbTransaction.rollback()
 
             return res.status(400).json({
-
-                success:
-                    false,
-
-                message:
-                    'Nominal deposit tidak valid.'
-
+                success: false,
+                message: 'Nominal deposit tidak valid.'
             })
 
         }
 
 
-        const current =
-            Number(
-                saving.current_amount
-            )
+        if (
+            !Number.isInteger(accountId) ||
+            accountId <= 0
+        ) {
+
+            await dbTransaction.rollback()
+
+            return res.status(400).json({
+                success: false,
+                message: 'Account sumber wajib dipilih.'
+            })
+
+        }
 
 
-        const newAmount =
-            current +
+        const saving =
+            await Savings.findOne({
+                where: {
+                    id: req.params.id,
+                    user_id: req.user.id
+                },
+                transaction: dbTransaction,
+                lock: dbTransaction.LOCK.UPDATE
+            })
+
+
+        if (!saving) {
+
+            await dbTransaction.rollback()
+
+            return res.status(404).json({
+                success: false,
+                message: 'Tabungan tidak ditemukan.'
+            })
+
+        }
+
+
+        if (saving.status === 'cancelled') {
+
+            await dbTransaction.rollback()
+
+            return res.status(400).json({
+                success: false,
+                message: 'Tabungan sudah dibatalkan.'
+            })
+
+        }
+
+
+        const account =
+            await Account.findOne({
+                where: {
+                    id: accountId,
+                    user_id: req.user.id
+                },
+                transaction: dbTransaction,
+                lock: dbTransaction.LOCK.UPDATE
+            })
+
+
+        if (!account) {
+
+            await dbTransaction.rollback()
+
+            return res.status(404).json({
+                success: false,
+                message: 'Account sumber tidak ditemukan.'
+            })
+
+        }
+
+
+        const accountBalance =
+            Number(account.balance)
+
+
+        if (depositAmount > accountBalance) {
+
+            await dbTransaction.rollback()
+
+            return res.status(400).json({
+                success: false,
+                message:
+                    'Saldo account tidak mencukupi untuk melakukan transfer ke tabungan.'
+            })
+
+        }
+
+
+        const currentSavingAmount =
+            Number(saving.current_amount)
+
+        const newSavingAmount =
+            currentSavingAmount +
             depositAmount
-
-
-        saving.current_amount =
-            newAmount
 
 
         /*
         |--------------------------------------------------------------------------
-        | AUTO COMPLETE
+        | UPDATE SALDO
         |--------------------------------------------------------------------------
-        |
-        | Hanya target saving.
-        |
+        */
+
+        account.balance =
+            accountBalance -
+            depositAmount
+
+
+        saving.current_amount =
+            newSavingAmount
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | AUTO COMPLETED TARGET
+        |--------------------------------------------------------------------------
         */
 
         if (
             saving.type === 'target' &&
-            Number(
-                saving.target_amount
-            ) > 0 &&
-            newAmount >=
-                Number(
-                    saving.target_amount
-                )
+            Number(saving.target_amount) > 0 &&
+            newSavingAmount >=
+                Number(saving.target_amount)
         ) {
 
             saving.status =
@@ -1514,12 +2050,34 @@ async function depositSaving(req, res) {
         }
 
 
-        await saving.save({
-
-            transaction
-
+        await account.save({
+            transaction:
+                dbTransaction
         })
 
+
+        await saving.save({
+            transaction:
+                dbTransaction
+        })
+
+
+        const normalizedDescription =
+            description
+                ? String(description).trim()
+                : null
+
+
+        const transactionDate =
+            transaction_date ||
+            new Date()
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | SAVINGS TRANSACTION
+        |--------------------------------------------------------------------------
+        */
 
         const savingTransaction =
             await SavingsTransaction.create({
@@ -1537,25 +2095,75 @@ async function depositSaving(req, res) {
                     depositAmount,
 
                 description:
-                    description
-                        ? String(
-                            description
-                        ).trim()
-                        : null,
+                    normalizedDescription,
 
                 transaction_date:
-                    transaction_date ||
-                    new Date()
+                    transactionDate
 
             }, {
-
-                transaction
-
+                transaction:
+                    dbTransaction
             })
 
 
-        await transaction.commit()
+        /*
+        |--------------------------------------------------------------------------
+        | MAIN TRANSACTION
+        |
+        | PENTING:
+        | Ini bukan expense.
+        | Ini transfer dari account ke tabungan.
+        |--------------------------------------------------------------------------
+        */
 
+        const transferTransaction =
+            await Transaction.create({
+
+                user_id:
+                    req.user.id,
+
+                category_id:
+                    null,
+
+                account_id:
+                    account.id,
+
+                saving_id:
+                    saving.id,
+
+                type:
+                    'transfer',
+
+                amount:
+                    depositAmount,
+
+                description:
+                    normalizedDescription ||
+                    `Transfer ke tabungan ${saving.name}`,
+
+                transaction_date:
+                    transactionDate
+
+            }, {
+                transaction:
+                    dbTransaction
+            })
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | COMMIT
+        |--------------------------------------------------------------------------
+        */
+
+        await dbTransaction.commit()
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | NOTIFICATION
+        |--------------------------------------------------------------------------
+        */
 
         if (Notification) {
 
@@ -1571,7 +2179,7 @@ async function depositSaving(req, res) {
                     'Tabungan bertambah',
 
                 message:
-                    `Deposit ${formatRupiah(depositAmount)} ditambahkan ke tabungan "${saving.name}".`,
+                    `${formatRupiah(depositAmount)} dipindahkan dari account "${account.name}" ke tabungan "${saving.name}".`,
 
                 is_read:
                     false
@@ -1587,14 +2195,19 @@ async function depositSaving(req, res) {
                 true,
 
             message:
-                'Deposit berhasil ditambahkan.',
+                'Transfer ke tabungan berhasil.',
 
             data: {
 
                 saving,
 
+                account,
+
+                saving_transaction:
+                    savingTransaction,
+
                 transaction:
-                    savingTransaction
+                    transferTransaction
 
             }
 
@@ -1605,7 +2218,7 @@ async function depositSaving(req, res) {
 
         try {
 
-            await transaction.rollback()
+            await dbTransaction.rollback()
 
         } catch {}
 
@@ -1622,14 +2235,13 @@ async function depositSaving(req, res) {
                 false,
 
             message:
-                'Gagal menambahkan deposit.'
+                'Gagal melakukan deposit.'
 
         })
 
     }
 
 }
-
 
 /*
 |--------------------------------------------------------------------------
@@ -1639,51 +2251,13 @@ async function depositSaving(req, res) {
 
 async function withdrawSaving(req, res) {
 
-    const transaction =
+    const dbTransaction =
         await sequelize.transaction()
-
 
     try {
 
-        const saving =
-            await Savings.findOne({
-
-                where: {
-
-                    id:
-                        req.params.id,
-
-                    user_id:
-                        req.user.id
-
-                },
-
-                transaction,
-
-                lock:
-                    transaction.LOCK.UPDATE
-
-            })
-
-
-        if (!saving) {
-
-            await transaction.rollback()
-
-            return res.status(404).json({
-
-                success:
-                    false,
-
-                message:
-                    'Tabungan tidak ditemukan.'
-
-            })
-
-        }
-
-
         const {
+            account_id,
             amount,
             description,
             transaction_date
@@ -1693,15 +2267,22 @@ async function withdrawSaving(req, res) {
         const withdrawAmount =
             toNumber(amount)
 
+        const accountId =
+            Number(account_id)
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | VALIDASI NOMINAL
+        |--------------------------------------------------------------------------
+        */
 
         if (
-            !Number.isFinite(
-                withdrawAmount
-            ) ||
+            !Number.isFinite(withdrawAmount) ||
             withdrawAmount <= 0
         ) {
 
-            await transaction.rollback()
+            await dbTransaction.rollback()
 
             return res.status(400).json({
 
@@ -1716,7 +2297,129 @@ async function withdrawSaving(req, res) {
         }
 
 
-        const current =
+        /*
+        |--------------------------------------------------------------------------
+        | VALIDASI ACCOUNT
+        |--------------------------------------------------------------------------
+        */
+
+        if (
+            !Number.isInteger(accountId) ||
+            accountId <= 0
+        ) {
+
+            await dbTransaction.rollback()
+
+            return res.status(400).json({
+
+                success:
+                    false,
+
+                message:
+                    'Account tujuan wajib dipilih.'
+
+            })
+
+        }
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | GET SAVING
+        |--------------------------------------------------------------------------
+        */
+
+        const saving =
+            await Savings.findOne({
+
+                where: {
+
+                    id:
+                        req.params.id,
+
+                    user_id:
+                        req.user.id
+
+                },
+
+                transaction:
+                    dbTransaction,
+
+                lock:
+                    dbTransaction.LOCK.UPDATE
+
+            })
+
+
+        if (!saving) {
+
+            await dbTransaction.rollback()
+
+            return res.status(404).json({
+
+                success:
+                    false,
+
+                message:
+                    'Tabungan tidak ditemukan.'
+
+            })
+
+        }
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | GET ACCOUNT
+        |--------------------------------------------------------------------------
+        */
+
+        const account =
+            await Account.findOne({
+
+                where: {
+
+                    id:
+                        accountId,
+
+                    user_id:
+                        req.user.id
+
+                },
+
+                transaction:
+                    dbTransaction,
+
+                lock:
+                    dbTransaction.LOCK.UPDATE
+
+            })
+
+
+        if (!account) {
+
+            await dbTransaction.rollback()
+
+            return res.status(404).json({
+
+                success:
+                    false,
+
+                message:
+                    'Account tujuan tidak ditemukan.'
+
+            })
+
+        }
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | VALIDASI SALDO TABUNGAN
+        |--------------------------------------------------------------------------
+        */
+
+        const currentSavingAmount =
             Number(
                 saving.current_amount
             )
@@ -1724,10 +2427,10 @@ async function withdrawSaving(req, res) {
 
         if (
             withdrawAmount >
-            current
+            currentSavingAmount
         ) {
 
-            await transaction.rollback()
+            await dbTransaction.rollback()
 
             return res.status(400).json({
 
@@ -1742,28 +2445,33 @@ async function withdrawSaving(req, res) {
         }
 
 
+        /*
+        |--------------------------------------------------------------------------
+        | UPDATE SALDO
+        |--------------------------------------------------------------------------
+        */
+
         saving.current_amount =
-            current -
+            currentSavingAmount -
+            withdrawAmount
+
+
+        account.balance =
+            Number(account.balance) +
             withdrawAmount
 
 
         /*
         |--------------------------------------------------------------------------
-        | Jika target sebelumnya completed
+        | TARGET STATUS
         |--------------------------------------------------------------------------
-        |
-        | Setelah saldo ditarik dan saldo berada di bawah target,
-        | status kembali active.
-        |
         */
 
         if (
             saving.type === 'target' &&
             saving.status === 'completed' &&
-            saving.current_amount <
-                Number(
-                    saving.target_amount
-                )
+            Number(saving.current_amount) <
+                Number(saving.target_amount)
         ) {
 
             saving.status =
@@ -1774,10 +2482,36 @@ async function withdrawSaving(req, res) {
 
         await saving.save({
 
-            transaction
+            transaction:
+                dbTransaction
 
         })
 
+
+        await account.save({
+
+            transaction:
+                dbTransaction
+
+        })
+
+
+        const normalizedDescription =
+            description
+                ? String(description).trim()
+                : null
+
+
+        const transactionDate =
+            transaction_date ||
+            new Date()
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | SAVINGS TRANSACTION
+        |--------------------------------------------------------------------------
+        */
 
         const savingTransaction =
             await SavingsTransaction.create({
@@ -1795,25 +2529,78 @@ async function withdrawSaving(req, res) {
                     withdrawAmount,
 
                 description:
-                    description
-                        ? String(
-                            description
-                        ).trim()
-                        : null,
+                    normalizedDescription,
 
                 transaction_date:
-                    transaction_date ||
-                    new Date()
+                    transactionDate
 
             }, {
 
-                transaction
+                transaction:
+                    dbTransaction
 
             })
 
 
-        await transaction.commit()
+        /*
+        |--------------------------------------------------------------------------
+        | MAIN TRANSACTION
+        |
+        | Ini juga transfer,
+        | bukan income.
+        |--------------------------------------------------------------------------
+        */
 
+        const transferTransaction =
+            await Transaction.create({
+
+                user_id:
+                    req.user.id,
+
+                category_id:
+                    null,
+
+                account_id:
+                    account.id,
+
+                saving_id:
+                    saving.id,
+
+                type:
+                    'transfer',
+
+                amount:
+                    withdrawAmount,
+
+                description:
+                    normalizedDescription ||
+                    `Transfer dari tabungan ${saving.name}`,
+
+                transaction_date:
+                    transactionDate
+
+            }, {
+
+                transaction:
+                    dbTransaction
+
+            })
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | COMMIT
+        |--------------------------------------------------------------------------
+        */
+
+        await dbTransaction.commit()
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | NOTIFICATION
+        |--------------------------------------------------------------------------
+        */
 
         if (Notification) {
 
@@ -1829,7 +2616,7 @@ async function withdrawSaving(req, res) {
                     'Tabungan berkurang',
 
                 message:
-                    `Withdrawal ${formatRupiah(withdrawAmount)} dari tabungan "${saving.name}".`,
+                    `${formatRupiah(withdrawAmount)} dipindahkan dari tabungan "${saving.name}" ke account "${account.name}".`,
 
                 is_read:
                     false
@@ -1845,14 +2632,19 @@ async function withdrawSaving(req, res) {
                 true,
 
             message:
-                'Withdrawal berhasil.',
+                'Transfer dari tabungan berhasil.',
 
             data: {
 
                 saving,
 
+                account,
+
+                saving_transaction:
+                    savingTransaction,
+
                 transaction:
-                    savingTransaction
+                    transferTransaction
 
             }
 
@@ -1863,7 +2655,7 @@ async function withdrawSaving(req, res) {
 
         try {
 
-            await transaction.rollback()
+            await dbTransaction.rollback()
 
         } catch {}
 

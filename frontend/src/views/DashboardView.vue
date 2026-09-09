@@ -171,6 +171,47 @@ const savingRate = computed(() => {
 
 })
 
+const netCashflow = computed(() => {
+
+  return dashboard.value?.netCashflow || 0
+
+})
+
+
+const totalTransfer = computed(() => {
+
+  return dashboard.value?.totalTransfer || 0
+
+})
+
+
+const totalSavingsDeposit = computed(() => {
+
+  return dashboard.value?.totalSavingsDeposit || 0
+
+})
+
+
+const totalSavingsWithdrawal = computed(() => {
+
+  return dashboard.value?.totalSavingsWithdrawal || 0
+
+})
+
+
+const netSavingsMovement = computed(() => {
+
+  return dashboard.value?.netSavingsMovement || 0
+
+})
+
+
+const transfers = computed(() => {
+
+  return dashboard.value?.transfers || []
+
+})
+
 
 const categoryExpenses = computed(() => {
 
@@ -421,33 +462,33 @@ onMounted(() => {
       <div class="row g-3 mb-4">
 
 
-        <!-- SAVING -->
+<!-- NET CASHFLOW -->
 
-        <div class="col-xl-4 col-md-6">
+<div class="col-xl-4 col-md-6">
 
-          <div class="budget-card metric-card">
+  <div class="budget-card metric-card">
 
-            <div class="metric-header">
+    <div class="metric-header">
 
-              <span>
-                Saving
-              </span>
+      <span>
+        Cashflow Bersih
+      </span>
 
-              <i class="bi bi-piggy-bank"></i>
+      <i class="bi bi-graph-up-arrow"></i>
 
-            </div>
+    </div>
 
-            <strong>
-              {{ formatMoney(saving) }}
-            </strong>
+    <strong>
+      {{ formatMoney(netCashflow) }}
+    </strong>
 
-            <small>
-              {{ savingRate }}% dari pemasukan
-            </small>
+    <small>
+      {{ savingRate }}% sisa dari pemasukan setelah pengeluaran
+    </small>
 
-          </div>
+  </div>
 
-        </div>
+</div>
 
 
         <!-- EXPENSE RATE -->
@@ -511,9 +552,107 @@ onMounted(() => {
       </div>
 
 
+<!-- ================================================= -->
+<!-- SAVINGS & TRANSFER -->
+<!-- ================================================= -->
+
+<div class="row g-3 mb-4">
+
+
+  <!-- TRANSFER -->
+
+  <div class="col-xl-4 col-md-6">
+
+    <div class="budget-card metric-card transfer-card">
+
+      <div class="metric-header">
+
+        <span>
+          Transfer ke Tabungan
+        </span>
+
+        <i class="bi bi-arrow-left-right"></i>
+
+      </div>
+
+      <strong>
+        {{ formatMoney(totalTransfer) }}
+      </strong>
+
+      <small>
+        Tidak dihitung sebagai pengeluaran
+      </small>
+
+    </div>
+
+  </div>
+
+
+  <!-- SAVINGS DEPOSIT -->
+
+  <div class="col-xl-4 col-md-6">
+
+    <div class="budget-card metric-card savings-deposit-card">
+
+      <div class="metric-header">
+
+        <span>
+          Masuk Tabungan
+        </span>
+
+        <i class="bi bi-piggy-bank"></i>
+
+      </div>
+
+      <strong>
+        {{ formatMoney(totalSavingsDeposit) }}
+      </strong>
+
+      <small>
+        Total dana yang masuk ke tabungan
+      </small>
+
+    </div>
+
+  </div>
+
+
+  <!-- SAVINGS WITHDRAWAL -->
+
+  <div class="col-xl-4 col-md-6">
+
+    <div class="budget-card metric-card savings-withdraw-card">
+
+      <div class="metric-header">
+
+        <span>
+          Diambil dari Tabungan
+        </span>
+
+        <i class="bi bi-arrow-down-circle"></i>
+
+      </div>
+
+      <strong>
+        {{ formatMoney(totalSavingsWithdrawal) }}
+      </strong>
+
+      <small>
+        Dana yang kembali ke account
+      </small>
+
+    </div>
+
+  </div>
+
+
+</div>
+
       <!-- ================================================= -->
       <!-- CONTENT -->
       <!-- ================================================= -->
+
+
 
       <div class="row g-3">
 
@@ -606,6 +745,8 @@ onMounted(() => {
           </div>
 
         </div>
+
+        
 
 
         <!-- ================================================= -->
@@ -711,6 +852,106 @@ onMounted(() => {
           </div>
 
         </div>
+
+        <!-- ================================================= -->
+<!-- TRANSFER HISTORY -->
+<!-- ================================================= -->
+
+<div class="col-12">
+
+  <div class="budget-card content-card">
+
+    <div class="card-heading">
+
+      <div>
+
+        <h5>
+          Aktivitas Transfer Tabungan
+        </h5>
+
+        <p>
+          Perpindahan dana antara account dan tabungan.
+        </p>
+
+      </div>
+
+      <i class="bi bi-arrow-left-right"></i>
+
+    </div>
+
+
+    <div
+      v-if="transfers.length"
+      class="transfer-list"
+    >
+
+      <div
+        v-for="item in transfers"
+        :key="item.id"
+        class="transfer-item"
+      >
+
+        <div class="transfer-icon">
+
+          <i class="bi bi-arrow-left-right"></i>
+
+        </div>
+
+
+        <div class="transfer-info">
+
+          <strong>
+
+            {{
+              item.description ||
+              'Transfer tabungan'
+            }}
+
+          </strong>
+
+          <span>
+
+            {{
+              item.account?.name ||
+              'Account'
+            }}
+
+            ·
+
+            {{ item.transaction_date }}
+
+          </span>
+
+        </div>
+
+
+        <strong class="transfer-amount">
+
+          {{ formatMoney(item.amount) }}
+
+        </strong>
+
+      </div>
+
+    </div>
+
+
+    <div
+      v-else
+      class="empty-state"
+    >
+
+      <i class="bi bi-arrow-left-right"></i>
+
+      <span>
+        Belum ada aktivitas transfer tabungan bulan ini.
+      </span>
+
+    </div>
+
+  </div>
+
+</div>
 
 
         <!-- ================================================= -->
@@ -1373,6 +1614,136 @@ onMounted(() => {
 
 }
 
+.transfer-list {
+
+  display: flex;
+
+  flex-direction: column;
+
+  gap: 10px;
+
+}
+
+
+.transfer-item {
+
+  display: flex;
+
+  align-items: center;
+
+  gap: 12px;
+
+  padding: 12px;
+
+  border:
+    1px solid var(--border-color);
+
+  border-radius: 11px;
+
+  transition:
+    all var(--transition);
+
+}
+
+
+.transfer-item:hover {
+
+  background:
+    var(--bg-card-hover);
+
+}
+
+
+.transfer-icon {
+
+  width: 40px;
+
+  height: 40px;
+
+  flex-shrink: 0;
+
+  display: flex;
+
+  align-items: center;
+
+  justify-content: center;
+
+  border-radius: 11px;
+
+  background:
+    rgba(59, 130, 246, 0.10);
+
+  color:
+    #3b82f6;
+
+}
+
+
+.transfer-info {
+
+  flex: 1;
+
+}
+
+
+.transfer-info strong {
+
+  display: block;
+
+  font-size: 12px;
+
+  color:
+    var(--text-primary);
+
+}
+
+
+.transfer-info span {
+
+  display: block;
+
+  margin-top: 3px;
+
+  color:
+    var(--text-muted);
+
+  font-size: 10px;
+
+}
+
+
+.transfer-amount {
+
+  font-size: 13px;
+
+  color:
+    var(--text-primary);
+
+}
+
+
+.transfer-card .metric-header i {
+
+  color:
+    #3b82f6;
+
+}
+
+
+.savings-deposit-card .metric-header i {
+
+  color:
+    var(--success);
+
+}
+
+
+.savings-withdraw-card .metric-header i {
+
+  color:
+    #f59e0b;
+
+}
 
 .empty-state {
 
@@ -1470,6 +1841,13 @@ onMounted(() => {
   }
 
 }
+/* =============================
+ADD
+============================= */
+
+
+
+
 
 
 @media (max-width: 575px) {
