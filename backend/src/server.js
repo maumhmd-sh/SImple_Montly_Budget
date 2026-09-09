@@ -19,6 +19,7 @@ const SavingsTransaction =
         "./models/SavingsTransaction"
     );
 
+
 const {
     User,
     Category,
@@ -27,6 +28,12 @@ const {
     MonthlyBudget,
     Notification
 } = require("./models");
+
+
+
+const {
+    generateFinancialAnalysis
+} = require("./api/aiFinancialService");
 
 const app = express();
 
@@ -4225,6 +4232,1152 @@ const balance =
     }
 
 });
+
+
+
+
+
+/*
+|--------------------------------------------------------------------------
+| AI FINANCIAL ANALYST
+|--------------------------------------------------------------------------
+*/
+
+// ============================================================================
+// HELPER FUNCTIONS
+// ============================================================================
+
+function safeNumber(value) {
+    const number = Number(value);
+    return Number.isFinite(number) ? number : 0;
+}
+
+function percentage(value, total) {
+    if (!total) {
+        return 0;
+    }
+
+    return Number(
+        ((value / total) * 100).toFixed(2)
+    );
+}
+
+function growthRate(current, previous) {
+    if (!previous) {
+        return null;
+    }
+
+    return Number(
+        (((current - previous) / previous) * 100).toFixed(2)
+    );
+}
+
+
+// ============================================================================
+// BUDGET CLASSIFICATION
+// ============================================================================
+
+function classifyBudgetUsage(percent) {
+    if (percent < 50) {
+        return "underutilized";
+    }
+
+    if (percent < 70) {
+        return "healthy";
+    }
+
+    if (percent < 85) {
+        return "monitoring";
+    }
+
+    if (percent <= 100) {
+        return "warning";
+    }
+
+    return "over_budget";
+}
+
+
+// ============================================================================
+// FINANCIAL HEALTH SCORE
+// ============================================================================
+
+function calculateFinancialHealth({
+    totalIncome,
+    totalExpense,
+    netCashflow,
+    savingRate,
+    totalBalance,
+    budgetProgress
+}) {
+
+    // ------------------------------------------------------------------------
+    // 1. CASHFLOW SCORE - 25 POINTS
+    // ------------------------------------------------------------------------
+
+    let cashflowScore = 0;
+
+    if (totalIncome <= 0) {
+        cashflowScore = 0;
+    } else {
+        const cashflowMargin =
+            (netCashflow / totalIncome) * 100;
+
+        if (cashflowMargin >= 50) {
+            cashflowScore = 25;
+        } else if (cashflowMargin >= 30) {
+            cashflowScore = 22;
+        } else if (cashflowMargin >= 20) {
+            cashflowScore = 19;
+        } else if (cashflowMargin >= 10) {
+            cashflowScore = 15;
+        } else if (cashflowMargin > 0) {
+            cashflowScore = 10;
+        } else {
+            cashflowScore = 0;
+        }
+    }
+
+
+    // ------------------------------------------------------------------------
+    // 2. EXPENSE CONTROL - 20 POINTS
+    // ------------------------------------------------------------------------
+
+    let expenseControlScore = 0;
+
+    if (totalIncome > 0) {
+        const expenseRate =
+            (totalExpense / totalIncome) * 100;
+
+        if (expenseRate <= 30) {
+            expenseControlScore = 20;
+        } else if (expenseRate <= 40) {
+            expenseControlScore = 18;
+        } else if (expenseRate <= 50) {
+            expenseControlScore = 15;
+        } else if (expenseRate <= 65) {
+            expenseControlScore = 10;
+        } else if (expenseRate <= 80) {
+            expenseControlScore = 5;
+        } else {
+            expenseControlScore = 0;
+        }
+    }
+
+
+    // ------------------------------------------------------------------------
+    // 3. SAVING RATE - 25 POINTS
+    // ------------------------------------------------------------------------
+
+    let savingScore = 0;
+
+    if (savingRate >= 40) {
+        savingScore = 25;
+    } else if (savingRate >= 30) {
+        savingScore = 22;
+    } else if (savingRate >= 20) {
+        savingScore = 19;
+    } else if (savingRate >= 10) {
+        savingScore = 15;
+    } else if (savingRate > 0) {
+        savingScore = 8;
+    } else {
+        savingScore = 0;
+    }
+
+
+    // ------------------------------------------------------------------------
+    // 4. BUDGET DISCIPLINE - 15 POINTS
+    // ------------------------------------------------------------------------
+
+    let budgetScore = 0;
+
+    if (!budgetProgress.length) {
+
+        // Tidak ada budget.
+        // Kita tidak menghukum terlalu besar,
+        // tetapi tetap memberi sinyal bahwa budgeting belum dilakukan.
+        budgetScore = 8;
+
+    } else {
+
+        const totalBudgets =
+            budgetProgress.length;
+
+        const overBudget =
+            budgetProgress.filter(
+                item => item.percentage > 100
+            ).length;
+
+        const warningBudget =
+            budgetProgress.filter(
+                item =>
+                    item.percentage >= 85 &&
+                    item.percentage <= 100
+            ).length;
+
+        const healthyBudget =
+            budgetProgress.filter(
+                item => item.percentage < 85
+            ).length;
+
+        const healthyRatio =
+            healthyBudget / totalBudgets;
+
+        const overBudgetRatio =
+            overBudget / totalBudgets;
+
+        if (overBudget === 0 && healthyRatio >= 0.8) {
+            budgetScore = 15;
+        } else if (overBudgetRatio <= 0.2 && healthyRatio >= 0.6) {
+            budgetScore = 12;
+        } else if (overBudgetRatio <= 0.4) {
+            budgetScore = 8;
+        } else {
+            budgetScore = 4;
+        }
+
+        // Sedikit penalti jika banyak budget sudah warning.
+        if (warningBudget > totalBudgets / 2) {
+            budgetScore = Math.max(
+                0,
+                budgetScore - 2
+            );
+        }
+    }
+
+
+    // ------------------------------------------------------------------------
+    // 5. LIQUIDITY - 15 POINTS
+    // ------------------------------------------------------------------------
+
+    let liquidityScore = 0;
+
+    if (totalBalance <= 0) {
+
+        liquidityScore = 0;
+
+    } else if (totalExpense <= 0) {
+
+        liquidityScore = 15;
+
+    } else {
+
+        // Berapa kali pengeluaran bulanan
+        // dapat ditutup oleh saldo saat ini.
+        const coverageMonths =
+            totalBalance / totalExpense;
+
+        if (coverageMonths >= 6) {
+            liquidityScore = 15;
+        } else if (coverageMonths >= 3) {
+            liquidityScore = 13;
+        } else if (coverageMonths >= 2) {
+            liquidityScore = 10;
+        } else if (coverageMonths >= 1) {
+            liquidityScore = 7;
+        } else if (coverageMonths >= 0.5) {
+            liquidityScore = 4;
+        } else {
+            liquidityScore = 2;
+        }
+    }
+
+
+    // ------------------------------------------------------------------------
+    // TOTAL SCORE
+    // ------------------------------------------------------------------------
+
+    const totalScore =
+        cashflowScore +
+        expenseControlScore +
+        savingScore +
+        budgetScore +
+        liquidityScore;
+
+
+    // ------------------------------------------------------------------------
+    // HEALTH LABEL
+    // ------------------------------------------------------------------------
+
+    let label;
+
+    if (totalScore >= 90) {
+        label = "Sangat Sehat";
+    } else if (totalScore >= 80) {
+        label = "Sehat";
+    } else if (totalScore >= 70) {
+        label = "Cukup Sehat";
+    } else if (totalScore >= 60) {
+        label = "Perlu Perhatian";
+    } else {
+        label = "Berisiko";
+    }
+
+
+    return {
+        score: totalScore,
+        label,
+
+        breakdown: {
+            cashflow: cashflowScore,
+            expense_control: expenseControlScore,
+            saving_rate: savingScore,
+            budget: budgetScore,
+            liquidity: liquidityScore
+        },
+
+        max_score: {
+            cashflow: 25,
+            expense_control: 20,
+            saving_rate: 25,
+            budget: 15,
+            liquidity: 15
+        }
+    };
+}
+
+
+// ============================================================================
+// AI FINANCIAL ANALYSIS ENDPOINT
+// ============================================================================
+
+app.get(
+    "/api/ai/financial-analysis",
+    auth,
+    async (req, res) => {
+
+        try {
+
+            // =================================================================
+            // MONTH
+            // =================================================================
+
+            const month =
+                req.query.month ||
+                new Date()
+                    .toISOString()
+                    .slice(0, 7);
+
+
+            // =================================================================
+            // VALIDATE MONTH
+            // =================================================================
+
+            if (
+                typeof month !== "string" ||
+                !/^\d{4}-(0[1-9]|1[0-2])$/.test(month)
+            ) {
+
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Bulan harus menggunakan format YYYY-MM."
+                });
+
+            }
+
+
+            const [
+                year,
+                monthNumber
+            ] = month
+                .split("-")
+                .map(Number);
+
+
+            const monthRange =
+                getMonthRange(month);
+
+
+            // =================================================================
+            // PREVIOUS MONTH
+            // =================================================================
+
+            const previousDate =
+                new Date(
+                    year,
+                    monthNumber - 2,
+                    1
+                );
+
+            const previousMonth =
+                `${previousDate.getFullYear()}-${String(
+                    previousDate.getMonth() + 1
+                ).padStart(2, "0")}`;
+
+            const previousRange =
+                getMonthRange(previousMonth);
+
+
+            // =================================================================
+            // GET CURRENT MONTH DATA
+            // =================================================================
+
+            const [
+                incomes,
+                expenses,
+                transfers,
+                budgets,
+                savingsTransactions,
+                accounts
+            ] = await Promise.all([
+
+                // --------------------------------------------------------------
+                // INCOME
+                // --------------------------------------------------------------
+
+                Transaction.findAll({
+                    where: {
+                        user_id: req.user.id,
+                        type: "income",
+                        transaction_date: {
+                            [Op.between]: [
+                                monthRange.start,
+                                monthRange.end
+                            ]
+                        }
+                    },
+
+                    include: [
+                        {
+                            model: Category,
+                            as: "category"
+                        }
+                    ]
+                }),
+
+
+                // --------------------------------------------------------------
+                // EXPENSE
+                // --------------------------------------------------------------
+
+                Transaction.findAll({
+                    where: {
+                        user_id: req.user.id,
+                        type: "expense",
+                        transaction_date: {
+                            [Op.between]: [
+                                monthRange.start,
+                                monthRange.end
+                            ]
+                        }
+                    },
+
+                    include: [
+                        {
+                            model: Category,
+                            as: "category"
+                        }
+                    ]
+                }),
+
+
+                // --------------------------------------------------------------
+                // TRANSFER
+                // --------------------------------------------------------------
+
+                Transaction.findAll({
+                    where: {
+                        user_id: req.user.id,
+                        type: "transfer",
+                        transaction_date: {
+                            [Op.between]: [
+                                monthRange.start,
+                                monthRange.end
+                            ]
+                        }
+                    }
+                }),
+
+
+                // --------------------------------------------------------------
+                // BUDGET
+                // --------------------------------------------------------------
+
+                MonthlyBudget.findAll({
+                    where: {
+                        user_id: req.user.id,
+                        month: monthNumber,
+                        year
+                    },
+
+                    include: [
+                        {
+                            model: Category,
+                            as: "category"
+                        }
+                    ]
+                }),
+
+
+                // --------------------------------------------------------------
+                // SAVINGS
+                // --------------------------------------------------------------
+
+                SavingsTransaction.findAll({
+                    where: {
+                        user_id: req.user.id,
+                        transaction_date: {
+                            [Op.between]: [
+                                monthRange.start,
+                                monthRange.end
+                            ]
+                        }
+                    }
+                }),
+
+
+                // --------------------------------------------------------------
+                // ACCOUNTS
+                // --------------------------------------------------------------
+
+                Account.findAll({
+                    where: {
+                        user_id: req.user.id
+                    }
+                })
+
+            ]);
+
+
+            // =================================================================
+            // CURRENT MONTH TOTALS
+            // =================================================================
+
+            const totalIncome =
+                incomes.reduce(
+                    (total, row) =>
+                        total +
+                        safeNumber(row.amount),
+                    0
+                );
+
+
+            const totalExpense =
+                expenses.reduce(
+                    (total, row) =>
+                        total +
+                        safeNumber(row.amount),
+                    0
+                );
+
+
+            const totalTransfer =
+                transfers.reduce(
+                    (total, row) =>
+                        total +
+                        safeNumber(row.amount),
+                    0
+                );
+
+
+            // Transfer bukan income / expense.
+            const netCashflow =
+                totalIncome -
+                totalExpense;
+
+
+            // =================================================================
+            // EXPENSE BY CATEGORY
+            // =================================================================
+
+            const categoryMap = {};
+
+            expenses.forEach(
+                expense => {
+
+                    const name =
+                        expense.category?.name ||
+                        "Lainnya";
+
+                    categoryMap[name] =
+                        (
+                            categoryMap[name] ||
+                            0
+                        ) +
+                        safeNumber(
+                            expense.amount
+                        );
+
+                }
+            );
+
+
+            const categoryExpenses =
+                Object.entries(categoryMap)
+                    .map(
+                        ([name, amount]) => ({
+
+                            name,
+
+                            amount,
+
+                            percentage:
+                                percentage(
+                                    amount,
+                                    totalExpense
+                                )
+
+                        })
+                    )
+                    .sort(
+                        (a, b) =>
+                            b.amount -
+                            a.amount
+                    );
+
+
+            // =================================================================
+            // BUDGET PROGRESS
+            // =================================================================
+
+            const budgetProgress =
+                budgets.map(
+                    budget => {
+
+                        const categoryName =
+                            budget.category?.name ||
+                            "Lainnya";
+
+                        const spent =
+                            categoryMap[
+                                categoryName
+                            ] || 0;
+
+                        const limit =
+                            safeNumber(
+                                budget.amount
+                            );
+
+                        const utilization =
+                            limit > 0
+                                ? percentage(
+                                    spent,
+                                    limit
+                                )
+                                : 0;
+
+                        return {
+
+                            category:
+                                categoryName,
+
+                            budget:
+                                limit,
+
+                            spent,
+
+                            percentage:
+                                utilization,
+
+                            status:
+                                classifyBudgetUsage(
+                                    utilization
+                                )
+
+                        };
+
+                    }
+                );
+
+
+            // =================================================================
+            // BUDGET SUMMARY
+            // =================================================================
+
+            const healthyBudgets =
+                budgetProgress.filter(
+                    item =>
+                        item.percentage < 85
+                ).length;
+
+
+            const warningBudgets =
+                budgetProgress.filter(
+                    item =>
+                        item.percentage >= 85 &&
+                        item.percentage <= 100
+                ).length;
+
+
+            const overBudget =
+                budgetProgress.filter(
+                    item =>
+                        item.percentage > 100
+                ).length;
+
+
+            // =================================================================
+            // SAVINGS
+            // =================================================================
+
+            const totalSavingsDeposit =
+                savingsTransactions
+                    .filter(
+                        transaction =>
+                            transaction.type ===
+                            "deposit"
+                    )
+                    .reduce(
+                        (total, transaction) =>
+                            total +
+                            safeNumber(
+                                transaction.amount
+                            ),
+                        0
+                    );
+
+
+            const totalSavingsWithdrawal =
+                savingsTransactions
+                    .filter(
+                        transaction =>
+                            transaction.type ===
+                            "withdrawal"
+                    )
+                    .reduce(
+                        (total, transaction) =>
+                            total +
+                            safeNumber(
+                                transaction.amount
+                            ),
+                        0
+                    );
+
+
+            const netSavingsMovement =
+                totalSavingsDeposit -
+                totalSavingsWithdrawal;
+
+
+            // =================================================================
+            // FINANCIAL RATES
+            // =================================================================
+
+            const expenseRate =
+                percentage(
+                    totalExpense,
+                    totalIncome
+                );
+
+
+            // Saving rate harus berdasarkan
+            // actual savings movement.
+            const savingRate =
+                percentage(
+                    Math.max(
+                        0,
+                        netSavingsMovement
+                    ),
+                    totalIncome
+                );
+
+
+            const cashflowMargin =
+                percentage(
+                    netCashflow,
+                    totalIncome
+                );
+
+
+            // =================================================================
+            // TOTAL BALANCE
+            // =================================================================
+
+            const totalBalance =
+                accounts.reduce(
+                    (total, account) =>
+                        total +
+                        safeNumber(
+                            account.balance
+                        ),
+                    0
+                );
+
+
+            // =================================================================
+            // FINANCIAL HEALTH SCORE
+            // =================================================================
+
+            const financialHealth =
+                calculateFinancialHealth({
+
+                    totalIncome,
+
+                    totalExpense,
+
+                    netCashflow,
+
+                    savingRate,
+
+                    totalBalance,
+
+                    budgetProgress
+
+                });
+
+
+            // =================================================================
+            // PREVIOUS MONTH DATA
+            // =================================================================
+
+            const [
+                previousIncomes,
+                previousExpenses,
+                previousSavings
+            ] = await Promise.all([
+
+                Transaction.findAll({
+                    where: {
+                        user_id: req.user.id,
+                        type: "income",
+                        transaction_date: {
+                            [Op.between]: [
+                                previousRange.start,
+                                previousRange.end
+                            ]
+                        }
+                    }
+                }),
+
+                Transaction.findAll({
+                    where: {
+                        user_id: req.user.id,
+                        type: "expense",
+                        transaction_date: {
+                            [Op.between]: [
+                                previousRange.start,
+                                previousRange.end
+                            ]
+                        }
+                    }
+                }),
+
+                SavingsTransaction.findAll({
+                    where: {
+                        user_id: req.user.id,
+                        transaction_date: {
+                            [Op.between]: [
+                                previousRange.start,
+                                previousRange.end
+                            ]
+                        }
+                    }
+                })
+
+            ]);
+
+
+            const previousIncome =
+                previousIncomes.reduce(
+                    (total, row) =>
+                        total +
+                        safeNumber(row.amount),
+                    0
+                );
+
+
+            const previousExpense =
+                previousExpenses.reduce(
+                    (total, row) =>
+                        total +
+                        safeNumber(row.amount),
+                    0
+                );
+
+
+            const previousSavingsDeposit =
+                previousSavings
+                    .filter(
+                        transaction =>
+                            transaction.type ===
+                            "deposit"
+                    )
+                    .reduce(
+                        (total, transaction) =>
+                            total +
+                            safeNumber(
+                                transaction.amount
+                            ),
+                        0
+                    );
+
+
+            const previousSavingsWithdrawal =
+                previousSavings
+                    .filter(
+                        transaction =>
+                            transaction.type ===
+                            "withdrawal"
+                    )
+                    .reduce(
+                        (total, transaction) =>
+                            total +
+                            safeNumber(
+                                transaction.amount
+                            ),
+                        0
+                    );
+
+
+            const previousSavingsMovement =
+                previousSavingsDeposit -
+                previousSavingsWithdrawal;
+
+
+            const previousCashflow =
+                previousIncome -
+                previousExpense;
+
+
+            // =================================================================
+            // TRENDS
+            // =================================================================
+
+            const trends = {
+
+                income_growth:
+                    growthRate(
+                        totalIncome,
+                        previousIncome
+                    ),
+
+                expense_growth:
+                    growthRate(
+                        totalExpense,
+                        previousExpense
+                    ),
+
+                cashflow_growth:
+                    growthRate(
+                        netCashflow,
+                        previousCashflow
+                    ),
+
+                savings_growth:
+                    growthRate(
+                        netSavingsMovement,
+                        previousSavingsMovement
+                    )
+
+            };
+
+
+            // =================================================================
+            // TOP SPENDING CATEGORY
+            // =================================================================
+
+            const topCategory =
+                categoryExpenses.length
+                    ? categoryExpenses[0]
+                    : null;
+
+
+            // =================================================================
+            // DATA UNTUK GEMINI
+            // =================================================================
+
+            const financialData = {
+
+                period: {
+                    month,
+                    previous_month:
+                        previousMonth
+                },
+
+
+                financial_health: {
+
+                    score:
+                        financialHealth.score,
+
+                    label:
+                        financialHealth.label,
+
+                    breakdown:
+                        financialHealth.breakdown,
+
+                    max_score:
+                        financialHealth.max_score
+
+                },
+
+
+                summary: {
+
+                    total_income:
+                        totalIncome,
+
+                    total_expense:
+                        totalExpense,
+
+                    net_cashflow:
+                        netCashflow,
+
+                    expense_rate:
+                        expenseRate,
+
+                    saving_rate:
+                        savingRate,
+
+                    cashflow_margin:
+                        cashflowMargin,
+
+                    total_balance:
+                        totalBalance,
+
+                    total_transfer:
+                        totalTransfer
+
+                },
+
+
+                spending: {
+
+                    total:
+                        totalExpense,
+
+                    top_category:
+                        topCategory,
+
+                    categories:
+                        categoryExpenses
+
+                },
+
+
+                budgets: {
+
+                    total:
+                        budgetProgress.length,
+
+                    healthy:
+                        healthyBudgets,
+
+                    warning:
+                        warningBudgets,
+
+                    over_budget:
+                        overBudget,
+
+                    details:
+                        budgetProgress
+
+                },
+
+
+                savings: {
+
+                    total_deposit:
+                        totalSavingsDeposit,
+
+                    total_withdrawal:
+                        totalSavingsWithdrawal,
+
+                    net_movement:
+                        netSavingsMovement
+
+                },
+
+
+                trends
+
+            };
+
+
+            // =================================================================
+            // CALL GEMINI
+            // =================================================================
+
+            const analysis =
+                await generateFinancialAnalysis(
+                    financialData
+                );
+
+
+            // =================================================================
+            // RESPONSE
+            // =================================================================
+
+            return res.json({
+
+                success: true,
+
+                month,
+
+                previous_month:
+                    previousMonth,
+
+                financial_health:
+                    financialHealth,
+
+                metrics: {
+
+                    total_income:
+                        totalIncome,
+
+                    total_expense:
+                        totalExpense,
+
+                    net_cashflow:
+                        netCashflow,
+
+                    expense_rate:
+                        expenseRate,
+
+                    saving_rate:
+                        savingRate,
+
+                    cashflow_margin:
+                        cashflowMargin,
+
+                    total_balance:
+                        totalBalance,
+
+                    total_transfer:
+                        totalTransfer
+
+                },
+
+                trends,
+
+                analysis
+
+            });
+
+        } catch (error) {
+
+            console.error(
+                "GET /api/ai/financial-analysis:",
+                error
+            );
+
+
+            return res.status(500).json({
+
+                success: false,
+
+                message:
+                    "Gagal membuat analisis keuangan AI.",
+
+                error:
+                    process.env.NODE_ENV ===
+                    "development"
+                        ? error.message
+                        : undefined
+
+            });
+
+        }
+
+    }
+);
+
+
+// ============================================================================
+// END AI FINANCIAL ANALYST
+// ============================================================================
 
 
 /*

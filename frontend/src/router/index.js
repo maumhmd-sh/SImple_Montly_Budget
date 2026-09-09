@@ -15,6 +15,7 @@ import ReportsView from '../views/ReportsView.vue'
 import SettingsView from '../views/SettingsView.vue'
 import NotFoundView from '../views/NotFoundView.vue'
 import SavingsView from '../views/SavingsView.vue'
+import AIAnalystView from '../views/AIAnalystView.vue'
 
 import api from '../services/api'
 
@@ -178,6 +179,14 @@ const routes = [
       requiresAuth: true
     }
   },
+  {
+  path: '/ai-analyst',
+  name: 'ai-analyst',
+  component: AIAnalystView,
+  meta: {
+    requiresAuth: true
+  }
+},
 
 
   // ========================================
@@ -193,6 +202,8 @@ const routes = [
     requiresAuth: true
   }
 },
+
+
 
 {
   path: '/:pathMatch(.*)*',

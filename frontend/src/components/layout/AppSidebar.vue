@@ -47,6 +47,10 @@ const collapsed =
 
 const menus = [
 
+  // ======================================
+  // MAIN
+  // ======================================
+
   {
     section: 'MAIN',
 
@@ -61,6 +65,10 @@ const menus = [
     ]
   },
 
+
+  // ======================================
+  // FINANCE
+  // ======================================
 
   {
     section: 'FINANCE',
@@ -80,16 +88,16 @@ const menus = [
       },
 
       {
-  name: 'Budget',
-  icon: 'bi-wallet2',
-  path: '/budget'
-},
+        name: 'Budget',
+        icon: 'bi-wallet2',
+        path: '/budget'
+      },
 
-{
-  name: 'Tabungan',
-  icon: 'bi-piggy-bank',
-  path: '/savings'
-},
+      {
+        name: 'Tabungan',
+        icon: 'bi-piggy-bank',
+        path: '/savings'
+      },
 
       {
         name: 'Accounts',
@@ -101,6 +109,10 @@ const menus = [
   },
 
 
+  // ======================================
+  // ANALYTICS
+  // ======================================
+
   {
     section: 'ANALYTICS',
 
@@ -110,11 +122,22 @@ const menus = [
         name: 'Laporan',
         icon: 'bi-bar-chart-line',
         path: '/reports'
+      },
+
+      {
+        name: 'AI Analyst',
+        icon: 'bi-stars',
+        path: '/ai-analyst',
+        beta: true
       }
 
     ]
   },
 
+
+  // ======================================
+  // SYSTEM
+  // ======================================
 
   {
     section: 'SYSTEM',
@@ -185,6 +208,7 @@ function logout() {
     }"
   >
 
+
     <!-- ================================= -->
     <!-- LOGO -->
     <!-- ================================= -->
@@ -193,7 +217,9 @@ function logout() {
 
       <div class="logo-icon">
 
-        <i class="bi bi-pie-chart-fill"></i>
+        <i
+          class="bi bi-pie-chart-fill"
+        ></i>
 
       </div>
 
@@ -228,6 +254,9 @@ function logout() {
         class="menu-group"
       >
 
+
+        <!-- SECTION TITLE -->
+
         <div
           v-if="!collapsed"
           class="menu-section"
@@ -238,16 +267,26 @@ function logout() {
         </div>
 
 
+        <!-- MENU ITEMS -->
+
         <RouterLink
           v-for="item in group.items"
           :key="item.path"
           :to="item.path"
+
           class="sidebar-link"
+
           :class="{
             active:
-              isActive(item.path)
+              isActive(item.path),
+
+            'ai-link':
+              item.beta
           }"
         >
+
+
+          <!-- ICON -->
 
           <i
             class="bi"
@@ -255,15 +294,35 @@ function logout() {
           ></i>
 
 
+          <!-- TEXT -->
+
           <span
             v-if="!collapsed"
+            class="sidebar-link-text"
           >
 
             {{ item.name }}
 
           </span>
 
+
+          <!-- BETA -->
+
+          <small
+            v-if="
+              !collapsed &&
+              item.beta
+            "
+            class="ai-beta"
+          >
+
+            BETA
+
+          </small>
+
+
         </RouterLink>
+
 
       </div>
 
@@ -276,11 +335,15 @@ function logout() {
 
     <div class="sidebar-bottom">
 
+
+      <!-- ================================= -->
       <!-- COLLAPSE -->
+      <!-- ================================= -->
 
       <button
         type="button"
         class="sidebar-collapse"
+
         @click="
           collapsed =
             !collapsed
@@ -308,11 +371,14 @@ function logout() {
       </button>
 
 
+      <!-- ================================= -->
       <!-- LOGOUT -->
+      <!-- ================================= -->
 
       <button
         type="button"
         class="sidebar-logout"
+
         @click="logout"
       >
 
@@ -331,7 +397,9 @@ function logout() {
 
       </button>
 
+
     </div>
+
 
   </aside>
 
@@ -339,6 +407,11 @@ function logout() {
 
 
 <style scoped>
+
+
+/* ========================================
+   SIDEBAR
+======================================== */
 
 .app-sidebar {
 
@@ -373,6 +446,10 @@ function logout() {
 
 }
 
+
+/* ========================================
+   COLLAPSED
+======================================== */
 
 .app-sidebar.collapsed {
 
@@ -474,8 +551,52 @@ function logout() {
 
   overflow-y: auto;
 
+  overflow-x: hidden;
+
 }
 
+
+/* ========================================
+   SCROLLBAR
+======================================== */
+
+.sidebar-nav::-webkit-scrollbar {
+
+  width: 5px;
+
+}
+
+
+.sidebar-nav::-webkit-scrollbar-track {
+
+  background:
+    transparent;
+
+}
+
+
+.sidebar-nav::-webkit-scrollbar-thumb {
+
+  background:
+    var(--border-color);
+
+  border-radius:
+    999px;
+
+}
+
+
+.sidebar-nav::-webkit-scrollbar-thumb:hover {
+
+  background:
+    var(--text-muted);
+
+}
+
+
+/* ========================================
+   MENU GROUP
+======================================== */
 
 .menu-group {
 
@@ -484,6 +605,10 @@ function logout() {
 
 }
 
+
+/* ========================================
+   MENU SECTION
+======================================== */
 
 .menu-section {
 
@@ -503,7 +628,13 @@ function logout() {
 }
 
 
+/* ========================================
+   SIDEBAR LINK
+======================================== */
+
 .sidebar-link {
+
+  position: relative;
 
   height: 43px;
 
@@ -529,15 +660,23 @@ function logout() {
 
   font-weight: 600;
 
+  text-decoration: none;
+
   transition:
     all var(--transition);
 
 }
 
 
+/* ========================================
+   SIDEBAR ICON
+======================================== */
+
 .sidebar-link i {
 
   width: 22px;
+
+  flex-shrink: 0;
 
   text-align: center;
 
@@ -545,6 +684,27 @@ function logout() {
 
 }
 
+
+/* ========================================
+   SIDEBAR TEXT
+======================================== */
+
+.sidebar-link-text {
+
+  min-width: 0;
+
+  overflow: hidden;
+
+  white-space: nowrap;
+
+  text-overflow: ellipsis;
+
+}
+
+
+/* ========================================
+   HOVER
+======================================== */
 
 .sidebar-link:hover {
 
@@ -557,6 +717,10 @@ function logout() {
 }
 
 
+/* ========================================
+   ACTIVE
+======================================== */
+
 .sidebar-link.active {
 
   background:
@@ -564,6 +728,67 @@ function logout() {
 
   color:
     var(--accent);
+
+}
+
+
+/* ========================================
+   AI ANALYST
+======================================== */
+
+.ai-link {
+
+  position: relative;
+
+}
+
+
+/* ========================================
+   AI ICON
+======================================== */
+
+.ai-link > i {
+
+  color:
+    var(--accent);
+
+}
+
+
+/* ========================================
+   BETA BADGE
+======================================== */
+
+.ai-beta {
+
+  flex-shrink: 0;
+
+  margin-left: auto;
+
+  padding:
+    4px 7px;
+
+  border:
+    1px solid
+    var(--border-color);
+
+  border-radius:
+    999px;
+
+  background:
+    var(--accent-soft);
+
+  color:
+    var(--accent);
+
+  font-size: 8px;
+
+  font-weight: 800;
+
+  letter-spacing:
+    .6px;
+
+  line-height: 1;
 
 }
 
@@ -578,10 +803,15 @@ function logout() {
     12px;
 
   border-top:
-    1px solid var(--border-color);
+    1px solid
+    var(--border-color);
 
 }
 
+
+/* ========================================
+   COLLAPSE + LOGOUT
+======================================== */
 
 .sidebar-collapse,
 .sidebar-logout {
@@ -612,8 +842,39 @@ function logout() {
 
   cursor: pointer;
 
+  font-family: inherit;
+
+  font-size: 13px;
+
+  font-weight: 600;
+
+  transition:
+    all var(--transition);
+
 }
 
+
+/* ========================================
+   BUTTON ICON
+======================================== */
+
+.sidebar-collapse i,
+.sidebar-logout i {
+
+  width: 22px;
+
+  flex-shrink: 0;
+
+  text-align: center;
+
+  font-size: 17px;
+
+}
+
+
+/* ========================================
+   COLLAPSE HOVER
+======================================== */
 
 .sidebar-collapse:hover {
 
@@ -625,6 +886,10 @@ function logout() {
 
 }
 
+
+/* ========================================
+   LOGOUT
+======================================== */
 
 .sidebar-logout {
 
@@ -643,6 +908,68 @@ function logout() {
       68,
       0.08
     );
+
+}
+
+
+/* ========================================
+   COLLAPSED ALIGNMENT
+======================================== */
+
+.app-sidebar.collapsed
+.sidebar-link,
+.app-sidebar.collapsed
+.sidebar-collapse,
+.app-sidebar.collapsed
+.sidebar-logout {
+
+  justify-content:
+    center;
+
+  padding:
+    0;
+
+}
+
+
+.app-sidebar.collapsed
+.sidebar-link {
+
+  width: 50px;
+
+  margin-left: auto;
+
+  margin-right: auto;
+
+}
+
+
+.app-sidebar.collapsed
+.sidebar-collapse,
+.app-sidebar.collapsed
+.sidebar-logout {
+
+  width: 50px;
+
+  margin-left: auto;
+
+  margin-right: auto;
+
+}
+
+
+/* ========================================
+   COLLAPSED ICON
+======================================== */
+
+.app-sidebar.collapsed
+.sidebar-link i,
+.app-sidebar.collapsed
+.sidebar-collapse i,
+.app-sidebar.collapsed
+.sidebar-logout i {
+
+  margin: 0;
 
 }
 
