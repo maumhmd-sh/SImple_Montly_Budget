@@ -1330,7 +1330,8 @@ onMounted(() => {
 
           Analisis AI bersifat informatif
           dan menggunakan data finansial
-          yang tersedia pada aplikasi.
+          yang tersedia pada aplikasi. Gunakan fitur ini dengan sebaik mungkin!
+          
         </span>
 
 
